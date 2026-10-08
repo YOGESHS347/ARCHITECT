@@ -17,8 +17,8 @@ async def lifespan(app: FastAPI):
     process exits immediately instead of silently misbehaving at runtime."""
     if not os.getenv("JWT_SECRET"):
         raise ValueError("CRITICAL: JWT_SECRET environment variable is missing. Cannot boot securely.")
-    if not (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")):
-        raise ValueError("CRITICAL: GOOGLE_API_KEY (or GEMINI_API_KEY) is missing. Cannot generate AI layouts.")
+    if not any([os.getenv("GOOGLE_API_KEY"), os.getenv("GEMINI_API_KEY"), os.getenv("GROQ_API_KEY"), os.getenv("HF_API_KEY")]):
+        raise ValueError("CRITICAL: No LLM API Key found (need GOOGLE, GEMINI, HF, or GROQ). Cannot generate AI layouts.")
     yield  # App is live
 
 app = FastAPI(title="AI Architect API", lifespan=lifespan)

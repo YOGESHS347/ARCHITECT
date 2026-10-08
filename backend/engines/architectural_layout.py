@@ -155,6 +155,59 @@ def build_layout_from_topology(
             r["name"] = f"{r['name']} {k}"
             used.add(r["name"])
 
+    # Resolving Overlaps via Separating Axis Theorem (SAT) push-out
+    def resolve_overlaps(rs, plot_w, plot_h, max_iterations=5):
+        for _ in range(max_iterations):
+            overlap_found = False
+            for a, b in itertools.combinations(rs, 2):
+                ox = min(a["x"]+a["width"], b["x"]+b["width"]) - max(a["x"], b["x"])
+                oy = min(a["y"]+a["height"], b["y"]+b["height"]) - max(a["y"], b["y"])
+                if ox > 0.01 and oy > 0.01:
+                    overlap_found = True
+                    if ox < oy:
+                        if a["x"] < b["x"]:
+                            if b["x"] + b["width"] + ox <= plot_w:
+                                b["x"] = round(b["x"] + ox, 2)
+                            elif a["x"] - ox >= 0:
+                                a["x"] = round(a["x"] - ox, 2)
+                            else:
+                                a["width"] = round(a["width"] - ox/2, 2)
+                                b["width"] = round(b["width"] - ox/2, 2)
+                                b["x"] = round(b["x"] + ox/2, 2)
+                        else:
+                            if a["x"] + a["width"] + ox <= plot_w:
+                                a["x"] = round(a["x"] + ox, 2)
+                            elif b["x"] - ox >= 0:
+                                b["x"] = round(b["x"] - ox, 2)
+                            else:
+                                a["width"] = round(a["width"] - ox/2, 2)
+                                b["width"] = round(b["width"] - ox/2, 2)
+                                a["x"] = round(a["x"] + ox/2, 2)
+                    else:
+                        if a["y"] < b["y"]:
+                            if b["y"] + b["height"] + oy <= plot_h:
+                                b["y"] = round(b["y"] + oy, 2)
+                            elif a["y"] - oy >= 0:
+                                a["y"] = round(a["y"] - oy, 2)
+                            else:
+                                a["height"] = round(a["height"] - oy/2, 2)
+                                b["height"] = round(b["height"] - oy/2, 2)
+                                b["y"] = round(b["y"] + oy/2, 2)
+                        else:
+                            if a["y"] + a["height"] + oy <= plot_h:
+                                a["y"] = round(a["y"] + oy, 2)
+                            elif b["y"] - oy >= 0:
+                                b["y"] = round(b["y"] - oy, 2)
+                            else:
+                                a["height"] = round(a["height"] - oy/2, 2)
+                                b["height"] = round(b["height"] - oy/2, 2)
+                                a["y"] = round(a["y"] + oy/2, 2)
+            if not overlap_found:
+                break
+
+    for f in layout["floors"]:
+        resolve_overlaps(f["rooms"], float(L), float(W))
+
     place_windows(layout, plot_w=float(L), plot_h=float(W))
     compute_paths(layout)
 
@@ -196,30 +249,111 @@ def build_layout_from_topology(
 
 
 
-def _bay_widths(L: int):
-    """
-    Returns (left_w, spine_w, right_w) ensuring:
-      - spine is always STAIR_W
-      - left gets ~35% of non-spine space
-      - right gets the rest (minimum 12 ft)
-    """
-    spine_w = STAIR_W
-    avail   = L - spine_w
-    left_w  = max(10, round(avail * 0.40))
-    right_w = avail - left_w
-    if right_w < 12:
-        left_w  = max(10, avail - 12)
-        right_w = avail - left_w
-    return left_w, spine_w, right_w
 
+# ── BSP Tree System (Upgrade 1) ───────────────────────────────────────────────
+WEIGHTS = {
+    "Living Room": 12,
+    "Parking": 8,
+    "Master Bedroom": 10,
+    "Bedroom": 8,
+    "Kitchen": 6,
+    "Dining Room": 6,
+    "Bathroom": 3,
+    "Powder Room": 2,
+    "Walk-in Closet": 3,
+    "Foyer": 4,
+    "Staircase": 6,
+    "Corridor": 4,
+    "Utility": 3,
+    "Store Room": 3,
+    "Laundry": 3,
+    "Balcony": 4,
+    "Open Area": 5,
+    "Family Lounge": 8,
+    "Study": 5,
+    "Terrace": 15,
+}
 
-# ΓöÇΓöÇ Door helper ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+def _get_weight(name: str) -> float:
+    for k, v in WEIGHTS.items():
+        if k.lower() in name.lower():
+            return float(v)
+    return 5.0
 
 def _door(wall: str, position: float, width: float = DOOR_W) -> dict:
     return {"wall": wall, "position": round(position), "width": width}
 
-
-# ΓöÇΓöÇ Ground Floor Drafter ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+def _bsp_pack(rect: tuple[float, float, float, float], rooms: list[dict], axis=None, door_wall="right") -> list[dict]:
+    if not rooms:
+        return []
+    if len(rooms) == 1:
+        name = rooms[0]["name"]
+        x, y, w, h = rect
+        door_pos = h * 0.4 if door_wall in ("left", "right") else w * 0.4
+        doors = [_door(door_wall, door_pos)]
+        if name == "Living Room":
+            doors.append(_door("bottom", w * 0.4))
+        elif name == "Parking":
+            doors.append({"wall": "top", "position": round(w * 0.7), "width": DOOR_W, "is_garage": True})
+            
+        return [{
+            "name": name, 
+            "x": x, "y": y, 
+            "width": w, "height": h,
+            "doors": doors,
+            "furniture": []
+        }]
+    
+    total_weight = sum(r["weight"] for r in rooms)
+    half_weight = total_weight / 2
+    
+    current_weight = 0
+    split_index = 1
+    for i, r in enumerate(rooms):
+        current_weight += r["weight"]
+        if current_weight >= half_weight and i > 0:
+            if i < len(rooms) - 1:
+                prev_diff = abs(half_weight - (current_weight - r["weight"]))
+                curr_diff = abs(current_weight - half_weight)
+                if prev_diff < curr_diff and i > 1:
+                    split_index = i
+                else:
+                    split_index = i + 1
+            else:
+                split_index = i
+            break
+            
+    left_rooms = rooms[:split_index]
+    right_rooms = rooms[split_index:]
+    
+    if not left_rooms or not right_rooms:
+        left_rooms = rooms[:1]
+        right_rooms = rooms[1:]
+        
+    left_weight = sum(r["weight"] for r in left_rooms)
+    right_weight = sum(r["weight"] for r in right_rooms)
+    total = left_weight + right_weight
+    ratio = left_weight / total if total > 0 else 0.5
+    
+    x, y, w, h = rect
+    
+    if axis is None:
+        axis = "V" if w > h else "H"
+        
+    if axis == "V":
+        left_w = w * ratio
+        right_w = w - left_w
+        rect1 = (x, y, left_w, h)
+        rect2 = (x + left_w, y, right_w, h)
+        next_axis = "H"
+    else:
+        top_h = h * ratio
+        bottom_h = h - top_h
+        rect1 = (x, y, w, top_h)
+        rect2 = (x, y + top_h, w, bottom_h)
+        next_axis = "V"
+        
+    return _bsp_pack(rect1, left_rooms, next_axis, door_wall) + _bsp_pack(rect2, right_rooms, next_axis, door_wall)
 
 def _build_ground_floor(
     L: int, W: int, topology: Any,
@@ -227,444 +361,178 @@ def _build_ground_floor(
     lift: int, vastu: bool, entry_dir: str,
     duplex: bool
 ) -> dict:
-    """
-    Ground Floor 3-bay layout with dynamic packing based on LLM topology.
-
-    Guarantees:
-      - When vastu=False: Living Room / Dining Room / Kitchen are pinned to the
-        right bay and Living Room is forced to the front.
-      - When vastu=True: the LLM topology's room order is trusted so compass
-        placement (Kitchen-SE, Master-SW etc.) survives into the geometry.
-      - Bathrooms are injected immediately after each bedroom in both bays.
-    """
-    # vastu flag flows through to guardrail logic below
-    rooms = []
-    left_w, spine_w, right_w = _bay_widths(L)
-    spine_x = left_w
-    right_x = spine_x + spine_w
-
-    stair_h = min(STAIR_H, max(6, W // 3))
-    stair_y = W - stair_h
-    front_h = min(16, max(10, round(W * 0.38)))
-    if stair_y <= front_h:
-        front_h = max(8, stair_y - 4)
-
-    # ── Topology Extraction ──────────────────────────────────────────────────
-    left_rooms  = list(topology.topology.left_bay.rooms)
+    left_rooms = list(topology.topology.left_bay.rooms)
     right_rooms = list(topology.topology.right_bay.rooms)
     spine_rooms = list(topology.topology.spine.rooms)
-
-    # ── ARCHITECTURAL ZONE RULE ──────────────────────────────────────────────
-    # DUPLEX:     Ground floor = PUBLIC zone (zero bedrooms, zero bathrooms).
-    #             All bedrooms belong on the upper floor (private zone).
-    #             Left bay gets Parking + Utility instead of bedrooms.
-    # SINGLE-FLOOR: Ground floor has all bedrooms (no upper floor).
+    
     is_bedroom = lambda r: "bedroom" in r.lower()
-
     if duplex:
-        # Strip ALL bedrooms from both bays — they go upstairs
-        left_rooms  = [r for r in left_rooms  if not is_bedroom(r)]
+        left_rooms = [r for r in left_rooms if not is_bedroom(r)]
         right_rooms = [r for r in right_rooms if not is_bedroom(r)]
-        # Left bay public-zone rooms for ground floor
-        has_parking = "Parking" in left_rooms
         if not left_rooms:
-            left_rooms = ["Parking", "Utility"] if not has_parking else ["Parking", "Utility"]
+            left_rooms = ["Parking", "Utility"]
         elif "Utility" not in left_rooms and "Study" not in left_rooms:
             left_rooms.append("Utility")
-        left_baths_alloc = 0   # no bathrooms on duplex ground floor
-    else:
-        left_baths_alloc = min(topology.topology.left_bay.bathrooms_allocated, remaining_baths)
-
-    # ── GUARDRAIL: Living/Dining/Kitchen MUST occupy the right bay ───────────
-    # When Vastu=True: trust the LLM topology for room order (it placed rooms
-    # for compass compliance). Only apply the hard override if the LLM
-    # completely forgot the Living Room.
+    
     LIVING_SPACES = {"Living Room", "Dining Room", "Kitchen"}
-    living_missing_from_right = "Living Room" not in right_rooms
-    if living_missing_from_right:
-        # LLM failed — emergency correction: force public zone into right bay
-        left_rooms  = [r for r in left_rooms  if r not in LIVING_SPACES]
-        right_rooms = [r for r in right_rooms if r not in LIVING_SPACES]
-        right_rooms = ["Living Room", "Dining Room", "Kitchen"] + [r for r in right_rooms if not is_bedroom(r)]
-
-    # Strip any stray bedrooms from right bay on duplex (living space only)
-    if duplex:
-        right_rooms = [r for r in right_rooms if not is_bedroom(r)]
-
-    # ── GUARDRAIL: pin anchor rooms to front of each bay ─────────────────────
-    # Parking always goes to left-bay front (structural / access requirement)
+    if "Living Room" not in right_rooms:
+        left_rooms = [r for r in left_rooms if r not in LIVING_SPACES]
+        right_rooms = ["Living Room", "Dining Room", "Kitchen"] + [r for r in right_rooms if r not in LIVING_SPACES and not is_bedroom(r)]
+        
     if "Parking" in left_rooms:
         left_rooms.remove("Parking")
         left_rooms.insert(0, "Parking")
-    # Foyer always at spine front (entry-spine rule, Vastu-neutral)
     if "Foyer" in spine_rooms:
         spine_rooms.remove("Foyer")
         spine_rooms.insert(0, "Foyer")
-    # Living Room front-pin: ONLY when Vastu=False or when the LLM had it missing
-    # When Vastu=True the LLM topology may have ordered the right bay differently
-    # (e.g. Kitchen at front for SE entry) — preserve that order for Vastu compliance
-    if not vastu or living_missing_from_right:
+    if not vastu or "Living Room" not in right_rooms:
         if "Living Room" in right_rooms:
             right_rooms.remove("Living Room")
             right_rooms.insert(0, "Living Room")
 
-
-    bath_num = [0]  # shared mutable counter so bathrooms are numbered 1,2,3… globally
-
-    def _pack_bay(bay_x: int, bay_w: int, room_names: list[str], is_left: bool, n_baths: int) -> list[dict]:
-        """Pack a bay column with rooms + inline bathrooms after each bedroom."""
-        packed = []
-        door_wall = "right" if is_left else "left"
-        y_cursor: float  = 0.0
-        baths_left = n_baths
-
-        n_beds = sum(1 for r in room_names if "bedroom" in r.lower())
-        # Total vertical slots to budget: rooms + bathrooms
-        total_slots = len(room_names) + n_baths
-
-        for idx, r_name in enumerate(room_names):
-            is_anchor  = r_name in ("Parking", "Living Room") and idx == 0
-            remaining_y = stair_y - y_cursor
-            remaining_slots = (len(room_names) - idx) + baths_left
-
-            if remaining_y < 4:
-                break
-
-            h: float
-            if r_name == "Living Room":
-                # Living Room must always be the largest room in the right bay.
-                # Give it at least 45 % of the remaining depth (capped at remaining_y).
-                # This prevents Utility / gap-fill from dwarfing it.
-                equal_share = remaining_y / max(1, remaining_slots)
-                h = min(remaining_y, max(MIN_ROOM_H, round(max(equal_share, remaining_y * 0.45))))
-            elif r_name.startswith("Dining"):
-                # Dining gets a normal equal share; slightly smaller than Living
-                h = max(MIN_ROOM_H, remaining_y // max(1, remaining_slots))
-            else:
-                h = min(front_h if is_anchor else max(MIN_ROOM_H, remaining_y // max(1, remaining_slots)), remaining_y)
-
-            # Assign door
-            if r_name == "Parking":
-                doors = [_door(door_wall, h * 0.4)]
-                # Add large exterior garage door on the front wall
-                ext_door = _door("top", bay_w * 0.7)
-                ext_door["is_garage"] = True
-                doors.append(ext_door)
-            elif r_name == "Living Room":
-                doors = [_door("left", h * 0.4), _door("bottom", bay_w * 0.4)]
-            else:
-                doors = [_door(door_wall, h * 0.3)]
-
-            packed.append({
-                "name": r_name,
-                "x": bay_x, "y": y_cursor, "width": bay_w, "height": h,
-                "doors": doors, "furniture": []
-            })
-            y_cursor += h
-
-            # Inject one bathroom immediately after this bedroom
-            if "bedroom" in r_name.lower() and baths_left > 0:
-                bath_remaining = stair_y - y_cursor
-                bath_h = max(MIN_BATH_H, min(7, bath_remaining - MIN_BED_H * max(0, n_beds - idx - 1)))
-                bath_h = min(bath_h, bath_remaining)
-                if bath_h >= MIN_BATH_H:
-                    bath_num[0] += 1
-                    baths_left  -= 1
-                    packed.append({
-                        "name": f"Bathroom {bath_num[0]}",
-                        "x": bay_x, "y": y_cursor, "width": bay_w, "height": bath_h,
-                        "doors": [_door(door_wall, bath_h * 0.3)], "furniture": []
-                    })
-                    y_cursor += bath_h
-
-        # Gap fill: if there's leftover space before stair_y
-        gap_h = stair_y - y_cursor
-        # Cap the gap-fill utility to a reasonable size (max 10 ft) so it
-        # never becomes larger than the Living Room when the plot is deep.
-        MAX_UTILITY_H = 10.0
-        if gap_h >= MIN_ROOM_H:
-            if not is_left and packed:
-                # On the right bay (Kitchen side), just stretch the last room (Kitchen/Dining) to fill the gap
-                packed[-1]["height"] = float(str(packed[-1]["height"])) + float(gap_h)
-                y_cursor += gap_h
-            else:
-                # If the gap is too large for a Utility room, also grow the
-                # last packed room (e.g. a bedroom) to absorb the excess,
-                # then add a reasonably sized Utility for the rest.
-                if gap_h > MAX_UTILITY_H and packed:
-                    extra = gap_h - MAX_UTILITY_H
-                    packed[-1]["height"] = float(str(packed[-1]["height"])) + float(extra)
-                    y_cursor += extra
-                    gap_h = MAX_UTILITY_H
-                # Avoid creating a second Utility if one already exists in the bay
-                existing_utility = next(
-                    (p for p in packed if str(p["name"]).lower() in ("utility", "store room")), None
-                )
-                if existing_utility:
-                    existing_utility["height"] = float(str(existing_utility["height"])) + float(gap_h)
-                else:
-                    packed.append({
-                        "name": "Utility" if is_left else "Store Room",
-                        "x": bay_x, "y": y_cursor, "width": bay_w, "height": gap_h,
-                        "doors": [_door(door_wall, gap_h * 0.3)], "furniture": []
-                    })
+    left_baths = min(topology.topology.left_bay.bathrooms_allocated, remaining_baths) if not duplex else 0
+    bath_cnt = 0
+    new_left = []
+    for r in left_rooms:
+        new_left.append(r)
+        if is_bedroom(r) and left_baths > 0:
+            bath_cnt += 1
+            new_left.append(f"Bathroom {bath_cnt}")
+            left_baths -= 1
+            remaining_baths -= 1
             
-        return packed
-
-    # ── Pack left bay ────────────────────────────────────────────────────────
-    left_result = _pack_bay(0, left_w, left_rooms, True, left_baths_alloc)
-    rooms.extend(left_result)
-
-    left_baths_placed = sum(1 for r in left_result if "bathroom" in r["name"].lower())
-    right_baths_alloc = max(0, remaining_baths - left_baths_placed)
-
-    # ── Left bay companion (Balcony / Utility at rear) ───────────────────────
-    # If balcony=0 but the left bay already has a Utility from the topology,
-    # use "Laundry" for the rear zone to avoid a duplicate name.
-    left_has_utility = any("utility" in r["name"].lower() for r in left_result)
-    if balcony:
-        left_companion = "Balcony"
-    elif left_has_utility:
-        left_companion = "Laundry"
-    else:
-        left_companion = "Utility"
-    rooms.append({
-        "name": left_companion,
-        "x": 0, "y": stair_y, "width": left_w, "height": stair_h,
-        "doors": [_door("top", left_w * 0.4)], "furniture": []
-    })
-
-    # ── Pack right bay ───────────────────────────────────────────────────────
-    rooms.extend(_pack_bay(right_x, right_w, right_rooms, False, right_baths_alloc))
-
-    # ── Right bay companion (Open Area at rear) ────────────────────────────────
-    rooms.append({
-        "name": "Open Area",
-        "x": right_x, "y": stair_y, "width": right_w, "height": stair_h,
-        "doors": [_door("left", stair_h * 0.3)], "furniture": []
-    })
-
-    # ── Spine: Foyer ─────────────────────────────────────────────────────────
-    foyer_h = front_h
-    rooms.append({
-        "name": "Foyer",
-        "x": spine_x, "y": 0, "width": spine_w, "height": foyer_h,
-        "doors": [
-            _door("top",    spine_w * 0.5),
-            _door("left",   foyer_h * 0.4),
-            _door("right",  foyer_h * 0.4),
-            _door("bottom", spine_w * 0.3),
-        ],
-        "furniture": []
-    })
-
-    # ── Spine: Corridor (only if meaningful depth remains) ───────────────────
-    corr_h = max(0, stair_y - foyer_h)
-    if corr_h >= 4:
-        rooms.append({
-            "name": "Corridor",
-            "x": spine_x, "y": foyer_h, "width": spine_w, "height": corr_h,
-            "doors": [_door("top", spine_w * 0.3)], "furniture": []
-        })
-
-    # ── Spine rear: Staircase (duplex) or Store Room (single floor) ──────────
+    left_rooms = new_left
+    left_rooms.append("Balcony" if balcony else "Utility")
+    
+    right_baths = max(0, remaining_baths) if not duplex else 0
+    new_right = []
+    for r in right_rooms:
+        new_right.append(r)
+        if is_bedroom(r) and right_baths > 0:
+            bath_cnt += 1
+            new_right.append(f"Bathroom {bath_cnt}")
+            right_baths -= 1
+    
+    right_rooms = new_right
+    right_rooms.append("Open Area")
+    
     if duplex:
-        rooms.append({
-            "name": "Staircase",
-            "x": spine_x, "y": stair_y, "width": STAIR_W, "height": stair_h,
-            "doors": [_door("top", STAIR_W * 0.3)], "furniture": []
-        })
+        spine_rooms.append("Staircase")
     else:
-        rooms.append({
-            "name": "Store Room",
-            "x": spine_x, "y": stair_y, "width": spine_w, "height": stair_h,
-            "doors": [_door("top", spine_w * 0.3)], "furniture": []
-        })
-
+        spine_rooms.append("Store Room")
+        
+    l_list = [{"name": n, "weight": _get_weight(n)} for n in left_rooms]
+    s_list = [{"name": n, "weight": _get_weight(n)} for n in spine_rooms]
+    r_list = [{"name": n, "weight": _get_weight(n)} for n in right_rooms]
+    
+    w_l = sum(r["weight"] for r in l_list)
+    w_s = sum(r["weight"] for r in s_list)
+    w_r = sum(r["weight"] for r in r_list)
+    
+    if w_s < 10: w_s = 10
+    total = w_l + w_s + w_r
+    
+    w1 = L * (w_l / total)
+    w2 = L * (w_s / total)
+    w3 = L * (w_r / total)
+    
+    if w2 < STAIR_W:
+        diff = STAIR_W - w2
+        w2 = STAIR_W
+        w1 -= diff/2
+        w3 -= diff/2
+        
+    x1 = 0
+    x2 = w1
+    x3 = w1 + w2
+    
+    rooms = []
+    rooms.extend(_bsp_pack((x1, 0, w1, W), l_list, axis="H", door_wall="right"))
+    rooms.extend(_bsp_pack((x2, 0, w2, W), s_list, axis="H", door_wall="left"))
+    rooms.extend(_bsp_pack((x3, 0, w3, W), r_list, axis="H", door_wall="left"))
+    
     return {"level": "Ground Floor", "rooms": rooms}
-
-
-
-# ΓöÇΓöÇ Upper Floor Drafter ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 def _build_upper_floor(
     L: int, W: int, floor_idx: int,
     beds: int, baths: int,
     topology: Any, terrace: int, lift: int, balcony: int = 0
 ) -> dict:
-    """
-    Upper Floor 3-bay layout using topology zoning.
-
-    OVERLAP GUARANTEE: Each bay uses a y-cursor. Every room starts at y_cursor
-    and advances cursor by room height. Cursor is clamped at stair_y.
-    Bathrooms are placed immediately after their bedroom ΓÇö no gap, no reorder.
-    """
-    rooms = []
     level = "Floor 1" if floor_idx == 1 else f"Floor {floor_idx}"
-
-    left_w, spine_w, right_w = _bay_widths(L)
-    spine_x = left_w
-    right_x = spine_x + spine_w
-    stair_h = min(STAIR_H, max(6, W // 3))   # adaptive on tiny plots
-    stair_y = W - stair_h
-
-    # ΓöÇΓöÇ SPINE ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-    rooms.append({
-        "name": "Corridor",
-        "x": spine_x, "y": 0, "width": spine_w, "height": stair_y,
-        "doors": [], # Adjacent rooms (Bedrooms, Bathrooms, Utility) already generate doors leading into the corridor
-        "furniture": []
-    })
-    rooms.append({
-        "name": "Staircase",
-        "x": spine_x, "y": stair_y, "width": STAIR_W, "height": stair_h,
-        "doors": [_door("top", STAIR_W * 0.3)],
-        "furniture": []
-    })
-
-    # ΓöÇΓöÇ Distribute beds and baths across bays using topology ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-    topo_left  = topology.topology.left_bay
-
-    left_baths_alloc  = min(topo_left.bathrooms_allocated,  baths)
-
-    # Count bedroom-type rooms in each bay from topology
-    def _count_beds(bay_rooms: list[str]) -> int:
-        return sum(1 for r in bay_rooms if "bedroom" in r.lower())
-
-    left_beds  = max(0, math.ceil(beds / 2))
+    
+    left_rooms = []
+    right_rooms = []
+    spine_rooms = ["Corridor", "Staircase"]
+    
+    left_beds = max(0, math.ceil(beds / 2))
     right_beds = max(0, beds - left_beds)
-    left_baths  = min(left_beds, left_baths_alloc)
+    
+    topo_left = topology.topology.left_bay
+    left_baths_alloc = min(topo_left.bathrooms_allocated, baths)
+    left_baths = min(left_beds, left_baths_alloc)
     right_baths = min(right_beds, max(0, baths - left_baths))
-
-    # Shared bedroom counter (1-based, incremented as beds are placed)
-    bed_num   = [0]
-    bath_num  = [0]
-    is_first_floor = (floor_idx == 1)
-
-    def _fill_bay(
-        bay_x: int, bay_w: int,
-        n_beds: int, n_baths: int,
-        is_left: bool,
-    ) -> list[dict]:
-        """
-        Fill a bay column with (bedroom + optional bathroom) units stacked top-to-bottom.
-        Returns list of room dicts.
-        OVERLAP GUARANTEE: y_cursor advances strictly by each room's exact height.
-        """
-        bay_rooms = []
-        door_wall = "right" if is_left else "left"
-        y_cursor: float  = 0.0
-
-        if n_beds == 0:
-            # Empty bay: open terrace/balcony
-            label = "Terrace" if (terrace and not is_left) else ("Balcony" if is_left else "Open Area")
-            bay_rooms.append({
-                "name": label,
-                "x": bay_x, "y": 0, "width": bay_w, "height": stair_y,
-                "doors": [_door(door_wall, 4)],
-                "furniture": []
-            })
+    
+    bed_num = 1
+    bath_num = 1
+    
+    for i in range(left_beds):
+        if floor_idx == 1 and i == 0:
+            left_rooms.append("Master Bedroom")
         else:
-            total_min = n_beds * MIN_BED_H + n_baths * MIN_BATH_H
-            slack = max(0, stair_y - total_min)
-            bed_bonus = slack // n_beds if n_beds else 0
-
-            for b in range(n_beds):
-                bed_num[0] += 1
-                has_bath = (b < n_baths)
-                is_last  = (b == n_beds - 1)
-
-                remaining = stair_y - y_cursor
-                if remaining < MIN_BED_H:
-                    break
-
-                # Absolute hard cap on bedroom depth to prevent 25ft long halls
-                ABSOLUTE_MAX_BED_H = 15
-
-                # Distribute space fairly, but enforce absolute max
-                bed_h = MIN_BED_H + bed_bonus
-                if bed_h > ABSOLUTE_MAX_BED_H:
-                    bed_h = ABSOLUTE_MAX_BED_H
-                
-                bath_h = min(7, MIN_BATH_H + 1) if has_bath else 0
-                
-                # If this is the last bedroom, it can claim some remaining space up to max
-                if is_last and remaining > (bed_h + bath_h):
-                    extra = remaining - (bed_h + bath_h)
-                    if bed_h + extra <= ABSOLUTE_MAX_BED_H:
-                        bed_h += extra
-
-                # Safety clamp against boundary
-                if y_cursor + bed_h + bath_h > stair_y:
-                    diff = (y_cursor + bed_h + bath_h) - stair_y
-                    bed_h -= diff
-                    if bed_h < MIN_BED_H and has_bath:
-                        bath_h = 0
-                        bed_h = min(stair_y - y_cursor, ABSOLUTE_MAX_BED_H)
-                
-                if bed_h < 6:
-                    break
-
-                # Name: Master Bedroom for first bed on Floor 1 left bay
-                if is_first_floor and is_left and b == 0:
-                    bed_name = "Master Bedroom"
-                else:
-                    bed_name = f"Bedroom {bed_num[0]}"
-
-                bay_rooms.append({
-                    "name": bed_name,
-                    "x": bay_x, "y": y_cursor, "width": bay_w, "height": bed_h,
-                    "doors": [_door(door_wall, bed_h * 0.4)],
-                    "furniture": []
-                })
-                y_cursor += bed_h
-
-                if bath_h > 0 and y_cursor + bath_h <= stair_y:
-                    bath_num[0] += 1
-                    bay_rooms.append({
-                        "name": f"Bathroom {bath_num[0]}",
-                        "x": bay_x, "y": y_cursor, "width": bay_w, "height": bath_h,
-                        "doors": [_door(door_wall, bath_h * 0.3)],
-                        "furniture": []
-                    })
-                    y_cursor += bath_h
-
-            # Gap fill: remaining space above stair_y becomes Family Lounge
-            gap = stair_y - y_cursor
-            if gap >= 7:
-                label = "Family Lounge" if not is_left else "Study"
-                bay_rooms.append({
-                    "name": label,
-                    "x": bay_x, "y": y_cursor, "width": bay_w, "height": gap,
-                    "doors": [_door(door_wall, gap * 0.4)],
-                    "furniture": []
-                })
-            elif gap > 0:
-                 # Small gap becomes Walk-in Closet
-                bay_rooms.append({
-                    "name": "Walk-in Closet",
-                    "x": bay_x, "y": y_cursor, "width": bay_w, "height": gap,
-                    "doors": [_door(door_wall, gap * 0.4)],
-                    "furniture": []
-                })
-
-        # Stair companion zone (always stair_h deep at the bottom)
-        companion = "Balcony" if (is_left and balcony > 0) else ("Terrace" if terrace else "Open Area")
-        companion_door = _door("top", bay_w * 0.4) if companion in ("Balcony", "Terrace") else _door(door_wall, stair_h * 0.3)
-        bay_rooms.append({
-            "name": companion,
-            "x": bay_x, "y": stair_y, "width": bay_w, "height": stair_h,
-            "doors": [companion_door],
-            "furniture": []
-        })
-
-        return bay_rooms
-
-    rooms += _fill_bay(0,       left_w,  left_beds,  left_baths,  True)
-    rooms += _fill_bay(right_x, right_w, right_beds, right_baths, False)
-
+            left_rooms.append(f"Bedroom {bed_num}")
+            bed_num += 1
+        if left_baths > 0:
+            left_rooms.append(f"Bathroom {bath_num}")
+            bath_num += 1
+            left_baths -= 1
+            
+    for i in range(right_beds):
+        right_rooms.append(f"Bedroom {bed_num}")
+        bed_num += 1
+        if right_baths > 0:
+            right_rooms.append(f"Bathroom {bath_num}")
+            bath_num += 1
+            right_baths -= 1
+            
+    if not left_beds:
+        left_rooms.append("Terrace" if terrace else ("Balcony" if balcony else "Open Area"))
+    else:
+        left_rooms.append("Family Lounge")
+        left_rooms.append("Balcony" if balcony else "Terrace")
+        
+    if not right_beds:
+        right_rooms.append("Terrace" if terrace else "Open Area")
+    else:
+        right_rooms.append("Walk-in Closet")
+        right_rooms.append("Terrace" if terrace else "Open Area")
+        
+    l_list = [{"name": n, "weight": _get_weight(n)} for n in left_rooms]
+    s_list = [{"name": n, "weight": _get_weight(n)} for n in spine_rooms]
+    r_list = [{"name": n, "weight": _get_weight(n)} for n in right_rooms]
+    
+    w_l = sum(r["weight"] for r in l_list)
+    w_s = sum(r["weight"] for r in s_list)
+    w_r = sum(r["weight"] for r in r_list)
+    
+    if w_s < 10: w_s = 10
+    total = w_l + w_s + w_r
+    
+    w1 = L * (w_l / total)
+    w2 = L * (w_s / total)
+    w3 = L * (w_r / total)
+    
+    if w2 < STAIR_W:
+        diff = STAIR_W - w2
+        w2 = STAIR_W
+        w1 -= diff/2
+        w3 -= diff/2
+        
+    rooms = []
+    rooms.extend(_bsp_pack((0, 0, w1, W), l_list, axis="H", door_wall="right"))
+    rooms.extend(_bsp_pack((w1, 0, w2, W), s_list, axis="H", door_wall="left"))
+    rooms.extend(_bsp_pack((w1+w2, 0, w3, W), r_list, axis="H", door_wall="left"))
+    
     return {"level": level, "rooms": rooms}
-
 
 # ΓöÇΓöÇ Legacy build_layout shim (keeps old callers working) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 

@@ -459,6 +459,8 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
   const displayRooms = dragRooms ?? rooms;
 
   const [draggingRoomIndex, setDraggingRoomIndex] = useState<number | null>(null);
+  const [draggingEdge, setDraggingEdge] = useState<'top' | 'right' | 'bottom' | 'left' | 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight' | null>(null);
+  const dragOriginalRooms = useRef<Room[] | null>(null);
   const dragStartPos = useRef({ x: 0, y: 0 });
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -502,33 +504,109 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
     return pt.matrixTransform(ctm.inverse());
   };
 
-  const handlePointerDown = (e: React.PointerEvent, _room: Room, index: number) => {
+  const handlePointerDown = (e: React.PointerEvent, _room: Room, index: number, edge?: 'top' | 'right' | 'bottom' | 'left' | 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight') => {
     setDraggingRoomIndex(index);
+    setDraggingEdge(edge || null);
     setDragRooms(rooms); // snapshot current rooms as drag base
+    dragOriginalRooms.current = JSON.parse(JSON.stringify(rooms));
     (e.target as Element).setPointerCapture(e.pointerId);
     dragStartPos.current = getSvgCoordinates(e.clientX, e.clientY);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (draggingRoomIndex === null) return;
+    if (draggingRoomIndex === null || !dragOriginalRooms.current) return;
     const currentPos = getSvgCoordinates(e.clientX, e.clientY);
     
     // Calculate total movement since the drag started
     const totalDx = currentPos.x - dragStartPos.current.x;
     const totalDy = currentPos.y - dragStartPos.current.y;
 
-    // Apply the total delta to the ORIGINAL room positions and snap to grid.
-    // This prevents rounding errors from accumulating and dropping slow movements.
-    setDragRooms(rooms.map((r, i) =>
-      i === draggingRoomIndex
-        ? { ...r, x: Math.round((r.x + totalDx) * 2) / 2, y: Math.round((r.y + totalDy) * 2) / 2 }
-        : r
-    ));
+    if (!draggingEdge) {
+      return; // Room box dragging disabled in favor of vertex/wall dragging
+    } else {
+      // Wall dragging logic: Resize target room AND adjacent rooms sharing this wall
+      const dx = Math.round(totalDx * 2) / 2;
+      const dy = Math.round(totalDy * 2) / 2;
+
+      const newRooms = JSON.parse(JSON.stringify(dragOriginalRooms.current)) as Room[];
+      const targetRoom = newRooms[draggingRoomIndex];
+      const origTarget = dragOriginalRooms.current[draggingRoomIndex];
+
+      let sharedX: number | null = null;
+      let sharedY: number | null = null;
+      let newSharedX: number | null = null;
+      let newSharedY: number | null = null;
+
+      if (draggingEdge?.includes('right')) {
+        targetRoom.width = Math.max(2, origTarget.width + dx);
+        sharedX = origTarget.x + origTarget.width;
+        newSharedX = targetRoom.x + targetRoom.width;
+      } else if (draggingEdge?.includes('left')) {
+        const shift = Math.min(origTarget.width - 2, dx);
+        targetRoom.x = origTarget.x + shift;
+        targetRoom.width = origTarget.width - shift;
+        sharedX = origTarget.x;
+        newSharedX = targetRoom.x;
+      }
+      
+      if (draggingEdge?.includes('bottom')) {
+        targetRoom.height = Math.max(2, origTarget.height + dy);
+        sharedY = origTarget.y + origTarget.height;
+        newSharedY = targetRoom.y + targetRoom.height;
+      } else if (draggingEdge?.includes('top')) {
+        const shift = Math.min(origTarget.height - 2, dy);
+        targetRoom.y = origTarget.y + shift;
+        targetRoom.height = origTarget.height - shift;
+        sharedY = origTarget.y;
+        newSharedY = targetRoom.y;
+      }
+
+      // Move ALL rooms that shared the original wall axis
+      for (let i = 0; i < newRooms.length; i++) {
+        if (i === draggingRoomIndex) continue;
+        const r = newRooms[i];
+        const origR = dragOriginalRooms.current[i];
+        let modified = false;
+        const EPSILON = 0.5;
+
+        if (sharedX !== null && newSharedX !== null) {
+           if (Math.abs(origR.x - sharedX) <= EPSILON) {
+               r.x = newSharedX;
+               r.width = origR.width - (r.x - origR.x);
+               modified = true;
+           }
+           if (Math.abs(origR.x + origR.width - sharedX) <= EPSILON) {
+               r.width = newSharedX - r.x;
+               modified = true;
+           }
+        }
+
+        if (sharedY !== null && newSharedY !== null) {
+           if (Math.abs(origR.y - sharedY) <= EPSILON) {
+               r.y = newSharedY;
+               r.height = origR.height - (r.y - origR.y);
+               modified = true;
+           }
+           if (Math.abs(origR.y + origR.height - sharedY) <= EPSILON) {
+               r.height = newSharedY - r.y;
+               modified = true;
+           }
+        }
+
+        if (modified) {
+           if (r.width < 2) { r.x -= (2 - r.width); r.width = 2; }
+           if (r.height < 2) { r.y -= (2 - r.height); r.height = 2; }
+        }
+      }
+
+      setDragRooms(newRooms);
+    }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
     if (draggingRoomIndex !== null) {
       setDraggingRoomIndex(null);
+      setDraggingEdge(null);
       (e.target as Element).releasePointerCapture(e.pointerId);
       
       if (dragRooms && plotWidth && plotHeight) {
@@ -728,14 +806,71 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
 
             {/* Selection highlight */}
             {isSelected && (
-              <rect
-                x={room.x - 0.3} y={room.y - 0.3}
-                width={room.width + 0.6} height={room.height + 0.6}
-                fill="rgba(37,99,235,0.08)"
-                stroke="#2563eb"
-                strokeWidth={0.2}
-                strokeDasharray="1 0.5"
-              />
+              <g>
+                <rect
+                  x={room.x - 0.3} y={room.y - 0.3}
+                  width={room.width + 0.6} height={room.height + 0.6}
+                  fill="rgba(37,99,235,0.08)"
+                  stroke="#2563eb"
+                  strokeWidth={0.2}
+                  strokeDasharray="1 0.5"
+                  style={{ pointerEvents: 'none' }}
+                />
+                {/* Grab Handles for Edge Dragging */}
+                <rect
+                  x={room.x + 0.8} y={room.y - 0.8}
+                  width={Math.max(0, room.width - 1.6)} height={1.6}
+                  fill="transparent"
+                  style={{ cursor: 'ns-resize' }}
+                  onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'top'); }}
+                />
+                <rect
+                  x={room.x + 0.8} y={room.y + room.height - 0.8}
+                  width={Math.max(0, room.width - 1.6)} height={1.6}
+                  fill="transparent"
+                  style={{ cursor: 'ns-resize' }}
+                  onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'bottom'); }}
+                />
+                <rect
+                  x={room.x - 0.8} y={room.y + 0.8}
+                  width={1.6} height={Math.max(0, room.height - 1.6)}
+                  fill="transparent"
+                  style={{ cursor: 'ew-resize' }}
+                  onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'left'); }}
+                />
+                <rect
+                  x={room.x + room.width - 0.8} y={room.y + 0.8}
+                  width={1.6} height={Math.max(0, room.height - 1.6)}
+                  fill="transparent"
+                  style={{ cursor: 'ew-resize' }}
+                  onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'right'); }}
+                />
+                {/* Grab Handles for Vertex Dragging */}
+                <circle
+                  cx={room.x} cy={room.y} r={1.2}
+                  fill="white" stroke="#2563eb" strokeWidth={0.2}
+                  style={{ cursor: 'nwse-resize' }}
+                  onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'topLeft'); }}
+                />
+                <circle
+                  cx={room.x + room.width} cy={room.y} r={1.2}
+                  fill="white" stroke="#2563eb" strokeWidth={0.2}
+                  style={{ cursor: 'nesw-resize' }}
+                  onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'topRight'); }}
+                />
+                <circle
+                  cx={room.x} cy={room.y + room.height} r={1.2}
+                  fill="white" stroke="#2563eb" strokeWidth={0.2}
+                  style={{ cursor: 'nesw-resize' }}
+                  onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'bottomLeft'); }}
+                />
+                <circle
+                  cx={room.x + room.width} cy={room.y + room.height} r={1.2}
+                  fill="white" stroke="#2563eb" strokeWidth={0.2}
+                  style={{ cursor: 'nwse-resize' }}
+                  onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'bottomRight'); }}
+                />
+              </g>
             )}
 
             <FurnitureLayer room={room} />

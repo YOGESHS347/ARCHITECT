@@ -703,7 +703,7 @@ export default function Editor() {
                       allRooms={currentRooms}
                       plotContext={plotContext}
                       onRoomUpdate={handleRoomUpdate}
-                      onLayoutUpdate={handleLayoutUpdate}
+                      onLayoutUpdate={(data, img) => handleLayoutUpdate(data, img, activeFloorIndexRef.current)}
                       onClose={() => setSelectedRoomIndex(null)}
                     />
                   </div>

@@ -31,14 +31,16 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY   = os.getenv("GROQ_API_KEY")
 HF_API_KEY     = os.getenv("HF_API_KEY")
 
-if not GOOGLE_API_KEY:
+if not any([GOOGLE_API_KEY, GROQ_API_KEY, HF_API_KEY]):
     raise ValueError(
-        "GOOGLE_API_KEY (or GEMINI_API_KEY) is missing. "
-        "Please add it to backend/.env"
+        "No LLM API Key (GOOGLE, GEMINI, GROQ, or HF) is found. "
+        "Please add at least one to backend/.env"
     )
 
 # ── Provider clients ──────────────────────────────────────────────────────────
-_google_client = genai.Client(api_key=GOOGLE_API_KEY)
+_google_client: Optional[genai.Client] = None
+if GOOGLE_API_KEY:
+    _google_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 _groq_client: Optional[OpenAI] = None
 if GROQ_API_KEY:
@@ -55,19 +57,14 @@ if HF_API_KEY:
     )
 
 # ── Fallback chain ────────────────────────────────────────────────────────────
-# Tried in order; each entry specifies provider, model name, and the client.
-# 1. Google Gemini 3.1 Pro Preview (Absolute best reasoning, but prone to 429 quota limits).
-# 2. HF DeepSeek-V3 (671B frontier model, massive logic capability).
-# 3. Google Gemini 3.8 Flash (Most intelligent Flash model, currently experiencing 503 high demand).
-# 4. Google Gemini 3.7 Flash (Previous-gen Flash model, currently 100% operational and better than 3.5).
-# 5. Groq Qwen 3.8 27B (Final lightning-fast safety net).
 FALLBACK_MODELS: list[dict] = []
 
-FALLBACK_MODELS.append({
-    "provider": "google",
-    "model": "gemini-3.1-pro-preview",
-    "client": _google_client,
-})
+if _google_client:
+    FALLBACK_MODELS.append({
+        "provider": "google",
+        "model": "gemini-3.1-pro-preview",
+        "client": _google_client,
+    })
 
 if _hf_client:
     FALLBACK_MODELS.append({
@@ -76,17 +73,17 @@ if _hf_client:
         "client": _hf_client,
     })
 
-FALLBACK_MODELS.append({
-    "provider": "google",
-    "model": "gemini-3.8-flash",
-    "client": _google_client,
-})
-
-FALLBACK_MODELS.append({
-    "provider": "google",
-    "model": "gemini-3.7-flash",
-    "client": _google_client,
-})
+if _google_client:
+    FALLBACK_MODELS.append({
+        "provider": "google",
+        "model": "gemini-3.8-flash",
+        "client": _google_client,
+    })
+    FALLBACK_MODELS.append({
+        "provider": "google",
+        "model": "gemini-3.7-flash",
+        "client": _google_client,
+    })
 
 if _groq_client:
     FALLBACK_MODELS.append({
