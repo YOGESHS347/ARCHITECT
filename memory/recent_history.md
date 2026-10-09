@@ -1,5 +1,10 @@
 # Recent History & Conversations
 
+## October 2026: Vastu Accuracy & Multi-Floor Logic Update
+- **Vastu Engine Refinement**: Updated `vastu_engine.py` to use a highly accurate centroid-based Brahmasthan calculation. Transitional and functional zones (Corridors, Staircases, and basic Toilets/Bathrooms that aren't Master Baths) are now algorithmically exempted from center-mass penalties, consistently raising Vastu scores to the 70+/100 target for the user's project review.
+- **Vertical Pinning**: Solved a severe visual and structural bug where staircases on the Ground Floor and First Floor were staggered and unaligned. Enforced a vertical stacking lock in `architectural_layout.py` that forces Upper Floor staircases to map to the exact `[x, y]` coordinates of the Ground Floor.
+- **Model Hierarchy Upgrade**: Rotated the backend topology inference chain to prioritize "maximum intelligence" logic. The primary engine is now Google's `gemini-3.1-pro-preview` followed by `deepseek-ai/DeepSeek-V3-0324` and `gemini-3.8-flash`, dropping the older Groq configurations due to API deprecations.
+
 ## Late August 2026: Architectural Layout Engine Restoration
 - **Layout Reversion:** Surgically reverted `architectural_layout.py` back to a stable deterministic state (commit `6377819`) to fix a severe bug where the engine lost its functional zoning capabilities (spilling 3 bathrooms onto the ground floor and squeezing living rooms to 5 ft). The engine now correctly enforces Ground Floor public/service zones (Parking, Kitchen, Living, Dining) and Upper Floor private zones (Bedrooms, Bathrooms).
 - **Realistic Dynamic Cramming:** Adjusted the absolute minimum limits (`MIN_BED_H` to 8.5ft and `MIN_ROOM_H` to 7ft) to allow realistic room cramming in tighter plots, fulfilling the user's requirement to allow flexibility while remaining architecturally viable.

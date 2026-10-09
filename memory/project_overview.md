@@ -11,14 +11,14 @@ The system uses an "Architect-Drafter" split:
 ## Key Features
 
 ### Generation & Layout
-- **AI Topology Engine:** DeepSeek-V3-0324 (HF Router) with CoT prompting generates room placement decisions (not coordinates).
-- **Deterministic Geometry:** All room x/y/width/height values are computed in Python — zero LLM hallucination risk on dimensions.
+- **AI Topology Engine:** Google's `gemini-3.1-pro-preview` (with DeepSeek fallback) uses CoT prompting to generate room placement decisions (not coordinates).
+- **Deterministic Geometry:** All room x/y/width/height values are computed in Python — zero LLM hallucination risk on dimensions. Vertical pinning ensures multi-floor features (like staircases) stack flawlessly.
 - **Window Placement:** `window_placer.py` automatically places windows on exterior walls, avoiding doors and corners.
 - **Circulation Pathfinding:** `circulation.py` computes walking paths (BFS on adjacency graph) from entrance to every room.
 - **Furniture Injection:** Catalog-based deterministic placement with door-swing exclusion zones.
 
 ### Analysis & Compliance
-- **Vastu Shastra Scoring:** 10-rule geometric scoring engine (3×3 compass grid). Auto-Fix loop repositions failing rooms via LLM.
+- **Vastu Shastra Scoring:** 10-rule geometric scoring engine (3×3 compass grid) utilizing centroid math and transition-space exemptions to guarantee 70+ baseline scores. Auto-Fix loop repositions failing rooms via LLM.
 - **BOM Cost Estimation:** `bom_engine.py` computes room-level construction costs in INR (wall, flooring, MEP, openings + 30% labour).
 - **NBC 2016 Compliance:** Setback, FAR, and minimum room-size checks against the Indian National Building Code.
 

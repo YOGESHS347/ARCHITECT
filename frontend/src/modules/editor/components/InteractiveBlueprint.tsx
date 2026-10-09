@@ -847,25 +847,25 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
                 />
                 {/* Grab Handles for Vertex Dragging */}
                 <circle
-                  cx={room.x} cy={room.y} r={1.2}
+                  cx={room.x} cy={room.y} r={0.6}
                   fill="white" stroke="#2563eb" strokeWidth={0.2}
                   style={{ cursor: 'nwse-resize' }}
                   onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'topLeft'); }}
                 />
                 <circle
-                  cx={room.x + room.width} cy={room.y} r={1.2}
+                  cx={room.x + room.width} cy={room.y} r={0.6}
                   fill="white" stroke="#2563eb" strokeWidth={0.2}
                   style={{ cursor: 'nesw-resize' }}
                   onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'topRight'); }}
                 />
                 <circle
-                  cx={room.x} cy={room.y + room.height} r={1.2}
+                  cx={room.x} cy={room.y + room.height} r={0.6}
                   fill="white" stroke="#2563eb" strokeWidth={0.2}
                   style={{ cursor: 'nesw-resize' }}
                   onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'bottomLeft'); }}
                 />
                 <circle
-                  cx={room.x + room.width} cy={room.y + room.height} r={1.2}
+                  cx={room.x + room.width} cy={room.y + room.height} r={0.6}
                   fill="white" stroke="#2563eb" strokeWidth={0.2}
                   style={{ cursor: 'nwse-resize' }}
                   onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'bottomRight'); }}

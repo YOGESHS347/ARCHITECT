@@ -4,10 +4,11 @@ inference.py
 Phase 1 — Architect-Drafter Hybrid Model
 
 LLM Fallback Chain (tried in order):
-  1. llama-3.3-70b-versatile  (Groq — fastest, JSON mode)
-  2. gemini-2.5-pro            (Google AI Studio — strong reasoning, strict JSON schema)
-  3. deepseek-ai/DeepSeek-V3-0324 (Hugging Face router — large open-weight fallback)
-  4. gemini-2.5-flash          (Google AI Studio — fast safety net, strict JSON schema)
+  1. gemini-3.1-pro-preview    (Google AI Studio — advanced intelligence, complex problem-solving fallback)
+  2. deepseek-ai/DeepSeek-V3-0324 (Hugging Face router — large open-weight fallback)
+  3. gemini-3.8-flash          (Google AI Studio — most intelligent Flash model, recommended primary)
+  4. qwen/qwen3.8-27b          (Groq — fastest open-weight fallback)
+  5. gemini-3.5-flash-lite     (Google AI Studio — fastest and most budget-friendly fallback)
 
 The LLM ONLY produces topology/zoning JSON — never raw x,y,w,h coordinates.
 The Python Drafter (architectural_layout.py) turns topology into exact coordinates.
@@ -79,17 +80,19 @@ if _google_client:
         "model": "gemini-3.8-flash",
         "client": _google_client,
     })
-    FALLBACK_MODELS.append({
-        "provider": "google",
-        "model": "gemini-3.7-flash",
-        "client": _google_client,
-    })
 
 if _groq_client:
     FALLBACK_MODELS.append({
         "provider": "groq",
         "model": "qwen/qwen3.8-27b",
         "client": _groq_client,
+    })
+
+if _google_client:
+    FALLBACK_MODELS.append({
+        "provider": "google",
+        "model": "gemini-3.5-flash-lite",
+        "client": _google_client,
     })
 
 
@@ -176,25 +179,40 @@ def _build_architect_prompt(
 
     vastu_str = "Strict Vastu Shastra compliance required." if vastu else "Modern layout preferred."
 
-    # Build vastu-specific overrides so the LLM prompt is unambiguous
     if vastu:
-        kitchen_rule = (
-            "VASTU OVERRIDE — Kitchen MUST go in the RIGHT BAY at the REAR (South-East for North/East entry). "
-            "Left Bay ground floor holds: Parking at front, then Utility/Study. "
-            "Right Bay ground floor holds (top-to-bottom): Living Room, Dining Room, Kitchen (at rear-SE)."
-        )
-        bedroom_rule = (
-            "VASTU OVERRIDE — Master Bedroom MUST be in the LEFT BAY on upper floors (South-West position). "
-            "Avoid placing any bedroom in the North-East zone."
-        )
+        ed = entry_dir.strip().lower()
+        if ed in ["east", "e"]:
+            k_bay, k_pos = "RIGHT BAY", "FRONT (first item)"
+            m_bay, m_pos = "RIGHT BAY", "REAR (last item)"
+            pooja_rule = "Pooja room MUST go in the LEFT BAY at the FRONT (North-East)."
+        elif ed in ["south", "s"]:
+            k_bay, k_pos = "LEFT BAY", "FRONT (first item)"
+            m_bay, m_pos = "RIGHT BAY", "FRONT (first item)"
+            pooja_rule = "Pooja room MUST go in the LEFT BAY at the REAR (North-East)."
+        elif ed in ["west", "w"]:
+            k_bay, k_pos = "LEFT BAY", "REAR (last item)"
+            m_bay, m_pos = "LEFT BAY", "FRONT (first item)"
+            pooja_rule = "Pooja room MUST go in the RIGHT BAY at the REAR (North-East)."
+        else: # North
+            k_bay, k_pos = "RIGHT BAY", "REAR (last item)"
+            m_bay, m_pos = "LEFT BAY", "REAR (last item)"
+            pooja_rule = "Pooja room MUST go in the RIGHT BAY at the FRONT (North-East)."
+            
+    if vastu:
+        kitchen_rule = f"VASTU OVERRIDE — Kitchen MUST go in the {k_bay} at the {k_pos} (South-East). Do not place Kitchen in North-East."
+        bedroom_rule = f"VASTU OVERRIDE — Master Bedroom MUST go in the {m_bay} at the {m_pos} (South-West) on upper floors. {pooja_rule} Avoid placing any bedroom in the North-East."
         balcony_rule = (
-            "VASTU OVERRIDE — Balcony/open spaces MUST face North or East. "
-            "Place balconies on the left bay (North side) if entry is from North."
+            "VASTU OVERRIDE — Balcony/open spaces MUST face North or East. \n"
+            "VASTU OVERRIDE — BRAHMASTHAN: The center of the house (Spine middle) MUST remain open. Never place a Bathroom or Kitchen in the Spine or center.\n"
+            "VASTU OVERRIDE — BATHROOMS: Avoid placing Bathrooms in the North-East.\n"
+            "VASTU OVERRIDE — STAIRCASE: Staircase MUST be placed in the South, West, or South-West zone (usually the Left Bay or Right Bay). DO NOT place the Staircase in the Spine/Center or North-East."
         )
+        spine_rule = "Upper Floors: Left Bay and Right Bay hold Bedrooms + Bathrooms. Spine holds Corridor."
     else:
         kitchen_rule = "Left Bay ground floor holds Parking + Kitchen (private/service zone). Right Bay holds Living Room + Dining Room (public zone)."
         bedroom_rule = "Upper floor bedrooms distributed evenly between Left Bay and Right Bay."
         balcony_rule = ""
+        spine_rule = "Upper Floors: Left Bay and Right Bay hold Bedrooms with their attached Bathrooms. Spine holds Corridor + Staircase."
 
     return f"""
 You are the Lead AI Architect. Design the optimal zoning topology for a floor plan.
@@ -210,7 +228,7 @@ You are the Lead AI Architect. Design the optimal zoning topology for a floor pl
 # Rules
 1. The building is divided into 3 vertical bays: Left Bay (left ~35%), Spine (central corridor/stair, ~20%), Right Bay (right ~45%).
 2. {kitchen_rule}
-3. Upper Floors: Left Bay and Right Bay hold Bedrooms with their attached Bathrooms. Spine holds Corridor + Staircase.
+3. {spine_rule}
 4. {bedroom_rule}
 5. {balcony_rule if balcony_rule else "No specific balcony placement required."}
 6. bathrooms_allocated = how many of the {bathrooms} bathrooms go to that bay's bedrooms. The total across both bays must equal {bathrooms}.

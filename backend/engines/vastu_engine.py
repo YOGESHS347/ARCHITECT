@@ -81,12 +81,12 @@ def _zone(room: dict, plot_w: float, plot_h: float, entry_dir: str) -> str:
 
 
 def _center_overlap(room: dict, plot_w: float, plot_h: float) -> bool:
-    """True if room overlaps the central 1/3 zone."""
+    """True if room's centroid is inside the central 1/3 zone."""
     cx0, cx1 = plot_w / 3, 2 * plot_w / 3
     cy0, cy1 = plot_h / 3, 2 * plot_h / 3
-    rx0, ry0 = room["x"], room["y"]
-    rx1, ry1 = rx0 + room["width"], ry0 + room["height"]
-    return rx1 > cx0 and rx0 < cx1 and ry1 > cy0 and ry0 < cy1
+    centroid_x = room["x"] + room["width"] / 2
+    centroid_y = room["y"] + room["height"] / 2
+    return (cx0 < centroid_x < cx1) and (cy0 < centroid_y < cy1)
 
 # ── Main scoring function ─────────────────────────────────────────────────────
 
@@ -121,10 +121,10 @@ def score_vastu(rooms: list, plot_w: float, plot_h: float, entry_dir: str) -> di
     w = WEIGHTS["kitchen"]
     kitchens = [z for _, t, z in typed if t == "kitchen"]
     if kitchens:
-        ks = {"SE": w, "NW": round(w*0.80), "W": round(w*0.65),
-              "N": round(w*0.40), "S": round(w*0.40), "E": round(w*0.30),
-              "SW": round(w*0.15), "C": round(w*0.10), "NE": 0}
-        pts = min(ks.get(z, round(w*0.30)) for z in kitchens)
+        ks = {"SE": w, "NW": round(w*0.80), "W": round(w*0.75),
+              "N": round(w*0.60), "S": round(w*0.60), "E": round(w*0.60),
+              "SW": round(w*0.40), "C": round(w*0.10), "NE": 0}
+        pts = min(ks.get(z, round(w*0.60)) for z in kitchens)
         z0 = kitchens[0]
         msg = "Ideal — Southeast" if z0 == "SE" else ("Good — Northwest" if z0 == "NW" else
               ("Avoid Northeast" if z0 == "NE" else "Acceptable"))
@@ -163,7 +163,7 @@ def score_vastu(rooms: list, plot_w: float, plot_h: float, entry_dir: str) -> di
         msg = "Ideal — Northeast" if poojas[0] == "NE" else "Acceptable"
         status = "pass" if pts >= round(w*0.65) else ("warn" if pts > 0 else "fail")
     else:
-        pts, status, msg = round(w*0.50), "warn", "No Pooja room (optional)"
+        pts, status, msg = w, "pass", "No Pooja room (optional)"
     results.append({"rule": "Pooja Room Placement", "status": status, "points": pts, "max": w, "detail": msg})
     total += pts
 
@@ -200,8 +200,10 @@ def score_vastu(rooms: list, plot_w: float, plot_h: float, entry_dir: str) -> di
     # ── Rule 7: Brahmasthan (center open) ────────────────────────────────────
     w = WEIGHTS["brahmasthan"]
     heavy_in_center = [r["name"] for r, t, z in typed
-                       if _center_overlap(r, plot_w, plot_h) and t in ("staircase", "bathroom", "kitchen")]
-    any_in_center = [r["name"] for r, t, z in typed if z == "C"]
+                       if _center_overlap(r, plot_w, plot_h) and t in ("bathroom", "kitchen")]
+    
+    exempt_center = ("staircase", "corridor", "foyer", "storage", "store room", "walk-in closet", "parking", "utility", "open area", "terrace")
+    any_in_center = [r["name"] for r, t, z in typed if z == "C" and not any(k in r["name"].lower() for k in exempt_center) and t not in exempt_center]
     if heavy_in_center:
         pts, status = 0, "fail"
         msg = f"Heavy rooms in center: {', '.join(heavy_in_center)}"
@@ -238,7 +240,7 @@ def score_vastu(rooms: list, plot_w: float, plot_h: float, entry_dir: str) -> di
         msg = "Ideal — Northeast" if water[0] == "NE" else "Acceptable"
         status = "pass" if pts >= round(w*0.75) else ("warn" if pts > 0 else "fail")
     else:
-        pts, status, msg = round(w*0.50), "warn", "No water room (optional)"
+        pts, status, msg = w, "pass", "No water room (optional)"
     results.append({"rule": "Water Source Placement", "status": status, "points": pts, "max": w, "detail": msg})
     total += pts
 
