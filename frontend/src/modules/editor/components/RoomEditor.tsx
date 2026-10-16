@@ -103,18 +103,48 @@ const RoomEditor: React.FC<Props> = ({ room, index, allRooms, plotContext, onRoo
     }
   };
 
+  const widthM = (room.width * 0.3048).toFixed(2);
+  const heightM = (room.height * 0.3048).toFixed(2);
+  const areaSqft = Math.round(room.width * room.height);
+  const areaM2 = (areaSqft * 0.092903).toFixed(1);
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: getRoomDotColor(room.name), boxShadow: 'var(--shadow-elevated)' }} />
           <div>
             <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>{room.name}</h3>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 500 }}>{room.width} × {room.height} ft</span>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 500, fontFamily: 'monospace' }}>
+              {room.width}×{room.height} ft ({widthM}×{heightM} m) • {areaSqft} sqft ({areaM2} m²)
+            </span>
           </div>
         </div>
         <button className="neu-btn-ghost" onClick={onClose} title="Close editor" style={{ padding: '0.4rem', fontSize: '1rem', borderRadius: '8px' }}>✕</button>
       </div>
+
+      {/* Openings (Doors & Windows) Schedule for this Room */}
+      {((room.doors && room.doors.length > 0) || (room.windows && room.windows.length > 0)) && (
+        <div className="neu-panel-inset" style={{ padding: '0.85rem 1rem' }}>
+          <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }}>
+            ROOM OPENINGS SCHEDULE
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {room.doors?.map((d: any, idx: number) => (
+              <div key={`d-${idx}`} style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ color: '#D85740', fontWeight: 700 }}>🚪 Door:</span>
+                <span>{d.wall || 'wall'} wall @ {d.position || 0}ft (width: {d.width || 3}ft{d.is_garage ? ' • Garage' : ''})</span>
+              </div>
+            ))}
+            {room.windows?.map((w: any, idx: number) => (
+              <div key={`w-${idx}`} style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ color: '#38BDF8', fontWeight: 700 }}>🪟 Window:</span>
+                <span>{w.wall || 'wall'} wall @ {w.position || 0}ft (width: {w.width || 4}ft)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Numeric precision editing */}
       <div className="neu-panel-inset" style={{ padding: '1.25rem' }}>

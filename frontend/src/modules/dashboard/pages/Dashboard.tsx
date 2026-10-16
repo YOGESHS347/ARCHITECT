@@ -1,36 +1,117 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../../auth/store/AuthContext';
 import type { Room } from '../../../shared/api-client/api';
 import { getProjects, deleteProject } from '../../../shared/api-client/api';
-import { useNavigate } from 'react-router-dom';
-import { LogOut, Plus, Trash2, FolderOpen, Search, Sparkles, Building2, Layout, Map } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import {
+  LogOut,
+  Plus,
+  Trash2,
+  Search,
+  Compass,
+  Building2,
+  Layers,
+  ArrowRight,
+  ExternalLink,
+  Calendar
+} from 'lucide-react';
 import toast from 'react-hot-toast';
-import { motion, AnimatePresence } from 'framer-motion';
+import ConceptSketchArtwork from '../components/artwork/ConceptSketchArtwork';
 
 interface ProjectData {
   id: string;
   name: string;
   created_at: string;
-  layout_data: { 
+  layout_data: {
     rooms?: Room[];
-    floors?: { rooms?: Room[] }[];
+    floors?: { level?: string; rooms?: Room[] }[];
     vastuScore?: number;
+    vastuResult?: { score?: number };
+    form?: { length?: number; width?: number; floors?: number };
   };
   image_url: string;
 }
 
-const containerVariants = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: { staggerChildren: 0.1 }
-  }
-};
+// Mini Drafting Sheet Vector Preview
+function PaperPlanThumbnail({ rooms, width = 40, length = 30 }: { rooms?: Room[]; width?: number; length?: number }) {
+  const plotW = width || 40;
+  const plotH = length || 30;
 
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
-};
+  if (!rooms || rooms.length === 0) {
+    return (
+      <div style={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--paper-sheet)',
+        color: 'var(--ink-annotation)',
+        fontSize: '0.75rem',
+        fontFamily: 'var(--font-mono)'
+      }}>
+        <Layers size={24} style={{ opacity: 0.4, marginBottom: '6px' }} />
+        <span>UNCONFIGURED PLAN</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ width: '100%', height: '100%', background: 'var(--paper-crisp)', position: 'relative', overflow: 'hidden' }}>
+      <svg width="100%" height="100%" viewBox={`0 0 ${plotW} ${plotH}`} style={{ display: 'block', padding: '12px' }}>
+        <defs>
+          <pattern id="thumbGrid" width="4" height="4" patternUnits="userSpaceOnUse">
+            <path d="M 4 0 L 0 0 0 4" fill="none" stroke="rgba(37,38,34,0.04)" strokeWidth="0.4" />
+          </pattern>
+        </defs>
+        <rect width={plotW} height={plotH} fill="url(#thumbGrid)" stroke="#777970" strokeWidth="0.8" strokeDasharray="2 1" />
+
+        {rooms.map((room, i) => (
+          <g key={i}>
+            <rect
+              x={room.x}
+              y={room.y}
+              width={room.width}
+              height={room.height}
+              fill="rgba(37, 38, 34, 0.03)"
+              stroke="#252622"
+              strokeWidth="1"
+              rx="0.3"
+            />
+            {room.width > 7 && room.height > 5 && (
+              <text
+                x={room.x + room.width / 2}
+                y={room.y + room.height / 2 + 0.8}
+                fontSize="1.8"
+                fill="#252622"
+                fontWeight="700"
+                fontFamily="var(--font-sans)"
+                textAnchor="middle"
+              >
+                {room.name.split(' ')[0]}
+              </text>
+            )}
+          </g>
+        ))}
+      </svg>
+
+      <div style={{
+        position: 'absolute',
+        bottom: '8px',
+        left: '8px',
+        background: 'rgba(250, 248, 242, 0.9)',
+        border: '1px solid var(--paper-border)',
+        padding: '2px 6px',
+        borderRadius: '3px',
+        fontSize: '0.62rem',
+        fontFamily: 'var(--font-mono)',
+        color: 'var(--ink-secondary)'
+      }}>
+        {rooms.length} SPACES
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -39,6 +120,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [vastuFilter, setVastuFilter] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [projectPendingDelete, setProjectPendingDelete] = useState<ProjectData | null>(null);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -57,15 +140,25 @@ export default function Dashboard() {
     fetchProjects();
   }, [fetchProjects]);
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  const handleDelete = (proj: ProjectData, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this design?')) return;
+    setProjectPendingDelete(proj);
+  };
+
+  const confirmDeleteProject = async () => {
+    if (!projectPendingDelete) return;
+    const targetId = projectPendingDelete.id;
+    setDeletingId(targetId);
     try {
-      await deleteProject(id);
-      setProjects(projects.filter(p => p.id !== id));
-      toast.success('Design deleted');
-    } catch {
-      toast.error('Failed to delete design');
+      await deleteProject(targetId);
+      setProjects(prev => prev.filter(p => p.id !== targetId));
+      toast.success(`Design "${projectPendingDelete.name}" deleted successfully`);
+      setProjectPendingDelete(null);
+    } catch (err: any) {
+      console.error('Delete project failed:', err);
+      toast.error(err?.message || 'Failed to delete design');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -81,322 +174,522 @@ export default function Dashboard() {
     }, 0) : 0;
   }, [projects]);
 
+  const vastuCompliantCount = useMemo(() => {
+    return Array.isArray(projects) ? projects.filter(p => (p.layout_data?.vastuScore ?? p.layout_data?.vastuResult?.score ?? 0) > 0).length : 0;
+  }, [projects]);
+
   const filteredProjects = useMemo(() => {
     return Array.isArray(projects) ? projects.filter(p => {
       const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const isVastuCompliant = p.layout_data?.vastuScore && p.layout_data.vastuScore > 0;
+      const vScore = p.layout_data?.vastuScore ?? p.layout_data?.vastuResult?.score ?? 0;
+      const isVastuCompliant = vScore > 0;
       const matchesVastu = vastuFilter ? isVastuCompliant : true;
       return matchesSearch && matchesVastu;
     }) : [];
   }, [projects, searchQuery, vastuFilter]);
 
-  return (
-    <div style={{ 
-      minHeight: '100vh', 
-      background: 'linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%)',
-      position: 'relative', 
-      overflow: 'hidden',
-      color: 'var(--text-primary)'
-    }}>
-      {/* Decorative Background Elements */}
-      <div style={{ position: 'absolute', top: '-10%', left: '-5%', width: '40vw', height: '40vw', background: 'var(--accent-color)', opacity: 0.05, filter: 'blur(100px)', borderRadius: '50%', pointerEvents: 'none' }} />
-      <div style={{ position: 'absolute', bottom: '-10%', right: '-5%', width: '30vw', height: '30vw', background: 'var(--success)', opacity: 0.05, filter: 'blur(100px)', borderRadius: '50%', pointerEvents: 'none' }} />
+  const featuredProject = filteredProjects[0];
+  const remainingProjects = filteredProjects.slice(1);
 
-      {/* Header */}
-      <motion.div 
-        initial={{ y: -100 }}
-        animate={{ y: 0 }}
-        transition={{ type: 'spring', stiffness: 200, damping: 20 }}
-        style={{ 
-          background: 'rgba(255, 255, 255, 0.05)', 
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          padding: '1.25rem 2.5rem', 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          position: 'sticky', 
-          top: 0, 
-          zIndex: 50,
-          borderBottom: '1px solid rgba(255,255,255,0.1)',
-        }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <motion.div 
-            whileHover={{ rotate: 180 }}
-            transition={{ duration: 0.5 }}
-            style={{ width: '36px', height: '36px', background: 'linear-gradient(135deg, var(--accent-color), #8B5CF6)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 800, fontSize: '1.2rem', boxShadow: '0 4px 15px rgba(99, 102, 241, 0.4)' }}
-          >
-            A
-          </motion.div>
-          <span style={{ fontSize: '1.3rem', fontWeight: 800, letterSpacing: '-0.02em', background: 'linear-gradient(90deg, var(--text-primary), var(--text-secondary))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-            AI Architect
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'var(--paper-warm)',
+      color: 'var(--ink-primary)',
+      fontFamily: 'var(--font-sans)',
+      display: 'flex',
+      flexDirection: 'column'
+    }}>
+      {/* ═══════════════════════════════════════════════════════════════════════
+          STUDIO HEADER & NAVIGATION
+      ═══════════════════════════════════════════════════════════════════════ */}
+      <header style={{
+        padding: '1rem 2.5rem',
+        background: 'var(--paper-sheet)',
+        borderBottom: '1px solid var(--paper-border)',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        position: 'sticky',
+        top: 0,
+        zIndex: 50
+      }}>
+        {/* Brand */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+          <Link to="/" style={{ textDecoration: 'none', color: 'inherit' }}>
+            <span style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '1.4rem', fontWeight: 600 }}>
+              AI Architect
+            </span>
+          </Link>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: 'var(--ink-annotation)', letterSpacing: '0.08em' }}>
+            STUDIO ARCHIVE
           </span>
         </div>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <motion.button 
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => navigate('/editor')} 
-            className="primary-btn" 
-            style={{ padding: '10px 24px', fontSize: '14px', gap: '8px', borderRadius: '12px', background: 'linear-gradient(135deg, var(--accent-color), #6366f1)', border: 'none', boxShadow: '0 4px 15px rgba(99, 102, 241, 0.3)' }}
+
+        {/* Quick Actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <button
+            onClick={() => navigate('/editor?wizard=true')}
+            className="atelier-btn-secondary"
+            style={{ fontSize: '0.85rem', padding: '8px 16px', gap: '6px' }}
           >
-            <Plus size={18} /> New Design
-          </motion.button>
-          <motion.button 
-            whileHover={{ scale: 1.05, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}
-            whileTap={{ scale: 0.95 }}
-            onClick={logout} 
-            className="secondary-btn" 
-            style={{ padding: '10px 20px', fontSize: '14px', gap: '8px', borderRadius: '12px', border: '1px solid var(--border-color)', background: 'transparent' }}
+            <Building2 size={15} /> Multi-Floor Wizard
+          </button>
+
+          <button
+            onClick={() => navigate('/editor')}
+            className="atelier-btn-primary"
+            style={{ fontSize: '0.85rem', padding: '8px 18px', gap: '6px' }}
           >
-            <LogOut size={16} /> Logout
-          </motion.button>
+            <Plus size={15} /> New Drawing
+          </button>
+
+          <div style={{ height: '24px', width: '1px', background: 'var(--paper-border)', margin: '0 4px' }} />
+
+          <button
+            onClick={logout}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--ink-annotation)',
+              fontSize: '0.85rem',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 10px',
+              cursor: 'pointer'
+            }}
+            title="Sign out"
+          >
+            <LogOut size={15} /> Sign Out
+          </button>
         </div>
-      </motion.div>
+      </header>
 
-      <motion.div 
-        variants={containerVariants}
-        initial="hidden"
-        animate="show"
-        style={{ maxWidth: '1400px', margin: '0 auto', padding: '3rem 2rem' }}
-      >
-        {/* Welcome */}
-        <motion.div variants={itemVariants} style={{ marginBottom: '3rem' }}>
-          <h1 style={{ fontSize: '3rem', fontWeight: 900, letterSpacing: '-0.04em', marginBottom: '0.5rem' }}>
-            Welcome back, <span style={{ background: 'linear-gradient(135deg, var(--accent-color), #8B5CF6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>{user?.name}</span> 👋
-          </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '1.1rem', maxWidth: '600px', lineHeight: 1.6 }}>
-            Ready to build something amazing today? Manage your architectural blueprints, track Vastu scores, and visualize your spaces.
-          </p>
-        </motion.div>
-
-        {/* Stats */}
-        <motion.div variants={itemVariants} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '4rem' }}>
-          {[
-            { label: 'Total Designs', value: projects.length, icon: <Building2 size={32} />, color: '#6366f1', bg: 'rgba(99, 102, 241, 0.1)' },
-            { label: 'Rooms Generated', value: totalRooms, icon: <Layout size={32} />, color: '#14b8a6', bg: 'rgba(20, 184, 166, 0.1)' },
-            { label: 'Vastu Compliant', value: projects.filter(p => p.layout_data?.vastuScore && p.layout_data.vastuScore > 0).length, icon: <Sparkles size={32} />, color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.1)' },
-          ].map((stat, i) => (
-            <motion.div 
-              key={i} 
-              whileHover={{ y: -5, scale: 1.02 }}
-              style={{ 
-                padding: '2rem', 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center', 
-                background: 'rgba(255, 255, 255, 0.03)', 
-                backdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)', 
-                borderRadius: '24px', 
-                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.05)' 
-              }}
-            >
-              <div>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.5rem', fontWeight: 600 }}>{stat.label}</p>
-                <p style={{ fontSize: '3.5rem', fontWeight: 900, color: 'var(--text-primary)', margin: 0, lineHeight: 1 }}>{stat.value}</p>
-              </div>
-              <div style={{ width: '64px', height: '64px', borderRadius: '16px', background: stat.bg, color: stat.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {stat.icon}
-              </div>
-            </motion.div>
-          ))}
-        </motion.div>
-
-        {/* Projects Header & Controls */}
-        <motion.div variants={itemVariants} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem', flexWrap: 'wrap', gap: '1.5rem' }}>
-          <h2 style={{ fontWeight: 800, fontSize: '1.8rem', margin: 0, display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <Map size={28} style={{ color: 'var(--accent-color)' }} />
-            Your Blueprints
-          </h2>
-          <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
-            <motion.div whileFocus={{ scale: 1.02 }} style={{ position: 'relative' }}>
-              <Search size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
-              <input
-                type="text"
-                placeholder="Search blueprints..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                style={{ 
-                  width: '300px', 
-                  padding: '12px 16px 12px 48px', 
-                  borderRadius: '14px', 
-                  border: '1px solid rgba(255, 255, 255, 0.1)', 
-                  background: 'rgba(255, 255, 255, 0.05)', 
-                  color: 'var(--text-primary)', 
-                  fontSize: '1rem', 
-                  outline: 'none', 
-                  transition: 'all 0.3s',
-                  backdropFilter: 'blur(10px)'
-                }}
-                onFocus={e => {
-                  e.target.style.borderColor = 'var(--accent-color)';
-                  e.target.style.boxShadow = '0 0 0 3px rgba(99, 102, 241, 0.2)';
-                }}
-                onBlur={e => {
-                  e.target.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-                  e.target.style.boxShadow = 'none';
-                }}
-              />
-            </motion.div>
-            
-            <motion.label 
-              whileHover={{ scale: 1.02 }}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', cursor: 'pointer', padding: '10px 16px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.1)' }}
-            >
-              <div style={{
-                width: '24px', height: '24px', borderRadius: '8px', 
-                background: vastuFilter ? 'var(--accent-color)' : 'transparent',
-                border: `2px solid ${vastuFilter ? 'var(--accent-color)' : 'var(--text-secondary)'}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
-              }}>
-                <AnimatePresence>
-                  {vastuFilter && (
-                    <motion.span 
-                      initial={{ scale: 0 }} 
-                      animate={{ scale: 1 }} 
-                      exit={{ scale: 0 }}
-                      style={{ color: '#fff', fontSize: '14px', fontWeight: 'bold' }}
-                    >
-                      ✓
-                    </motion.span>
-                  )}
-                </AnimatePresence>
-              </div>
-              <input
-                type="checkbox"
-                checked={vastuFilter}
-                onChange={e => setVastuFilter(e.target.checked)}
-                style={{ display: 'none' }}
-              />
-              Vastu-compliant Only
-            </motion.label>
+      {/* ═══════════════════════════════════════════════════════════════════════
+          STUDIO WORKSPACE DESK BODY
+      ═══════════════════════════════════════════════════════════════════════ */}
+      <div style={{ maxWidth: 1320, width: '100%', margin: '0 auto', padding: '3rem 2rem', flex: 1 }}>
+        
+        {/* Desk Welcome & Typographic Summary Strip */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-end',
+          borderBottom: '1px solid var(--paper-border)',
+          paddingBottom: '1.5rem',
+          marginBottom: '2.5rem',
+          flexWrap: 'wrap',
+          gap: '1.5rem'
+        }}>
+          <div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: 'var(--ink-annotation)', letterSpacing: '0.08em', marginBottom: '4px' }}>
+              RESIDENTIAL DESIGN ATELIER // ARCHITECT DESK
+            </div>
+            <h1 style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '2.6rem', fontWeight: 500, color: 'var(--ink-primary)', margin: 0 }}>
+              Welcome back, {user?.name || 'Architect'}.
+            </h1>
           </div>
-        </motion.div>
 
+          {/* Compact Typographic Metric Summary */}
+          <div style={{ display: 'flex', gap: '2rem', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--ink-secondary)' }}>
+            <div>
+              <span style={{ color: 'var(--ink-primary)', fontWeight: 700, fontSize: '1rem', marginRight: '6px' }}>{projects.length}</span>
+              PLANS IN ARCHIVE
+            </div>
+            <div>
+              <span style={{ color: 'var(--accent-vermilion)', fontWeight: 700, fontSize: '1rem', marginRight: '6px' }}>{totalRooms}</span>
+              ROOMS SYNTHESIZED
+            </div>
+            <div>
+              <span style={{ color: 'var(--success)', fontWeight: 700, fontSize: '1rem', marginRight: '6px' }}>{vastuCompliantCount}</span>
+              VASTU COMPLIANT
+            </div>
+          </div>
+        </div>
+
+        {/* Search & Filter Bar */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '2.5rem',
+          flexWrap: 'wrap',
+          gap: '1rem'
+        }}>
+          {/* Search Field */}
+          <div style={{ position: 'relative', width: '320px' }}>
+            <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-annotation)' }} />
+            <input
+              type="text"
+              placeholder="Filter drawings by name..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px 12px 8px 36px',
+                borderRadius: '6px',
+                border: '1px solid var(--paper-border)',
+                background: 'var(--paper-sheet)',
+                fontSize: '0.88rem'
+              }}
+            />
+          </div>
+
+          {/* Vastu filter pill */}
+          <button
+            onClick={() => setVastuFilter(!vastuFilter)}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '6px',
+              border: '1px solid',
+              borderColor: vastuFilter ? 'var(--success)' : 'var(--paper-border)',
+              background: vastuFilter ? 'var(--success-bg)' : 'var(--paper-sheet)',
+              color: vastuFilter ? 'var(--success)' : 'var(--ink-secondary)',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: 'pointer'
+            }}
+          >
+            <Compass size={14} /> Vastu Compliant Only {vastuFilter && '✓'}
+          </button>
+        </div>
+
+        {/* Loading State */}
         {loading ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '2rem' }}>
-            {[1, 2, 3, 4, 5, 6].map(i => (
-              <motion.div 
-                key={i}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: [0.5, 1, 0.5] }}
-                transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.1 }}
-                style={{ height: 320, borderRadius: '24px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }} 
-              />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '2rem' }}>
+            {[1, 2, 3].map(i => (
+              <div key={i} style={{ height: '320px', background: 'var(--paper-sheet)', borderRadius: '12px', border: '1px solid var(--paper-border)', opacity: 0.5 }} />
             ))}
           </div>
         ) : projects.length === 0 ? (
-          <motion.div variants={itemVariants} style={{ textAlign: 'center', padding: '8rem 2rem', background: 'rgba(255, 255, 255, 0.02)', border: '2px dashed rgba(255, 255, 255, 0.1)', borderRadius: '24px', backdropFilter: 'blur(10px)' }}>
-            <motion.div 
-              animate={{ y: [0, -10, 0] }} 
-              transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-            >
-              <FolderOpen size={80} style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', opacity: 0.5, margin: '0 auto' }} />
-            </motion.div>
-            <h3 style={{ fontWeight: 900, fontSize: '2rem', marginBottom: '1rem', color: 'var(--text-primary)' }}>No designs yet</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '2.5rem', fontSize: '1.2rem', maxWidth: '500px', margin: '0 auto 2.5rem' }}>Your workspace is empty. Start your architectural journey by generating your first AI-powered floor plan.</p>
-            <motion.button 
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => navigate('/editor')} 
-              className="primary-btn" 
-              style={{ padding: '16px 40px', borderRadius: '14px', fontSize: '1.1rem', background: 'linear-gradient(135deg, var(--accent-color), #8B5CF6)', border: 'none', boxShadow: '0 8px 25px rgba(99, 102, 241, 0.4)' }}
-            >
-              Start Designing Now →
-            </motion.button>
-          </motion.div>
+          /* DELIBERATE EMPTY STATE WITH ARCHITECTURAL SKETCH */
+          <div style={{
+            background: 'var(--paper-sheet)',
+            border: '1px solid var(--paper-border)',
+            borderRadius: '16px',
+            padding: '4rem 2rem',
+            boxShadow: 'var(--shadow-sm)'
+          }}>
+            <div style={{ maxWidth: '800px', margin: '0 auto', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3rem', alignItems: 'center' }}>
+              <div>
+                <ConceptSketchArtwork isAnimated={false} />
+              </div>
+
+              <div>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--accent-vermilion)', letterSpacing: '0.08em', fontWeight: 600 }}>
+                  STUDIO ARCHIVE EMPTY
+                </span>
+                <h3 style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '2.2rem', color: 'var(--ink-primary)', margin: '8px 0 12px 0' }}>
+                  Begin your first floor plan.
+                </h3>
+                <p style={{ color: 'var(--ink-secondary)', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: '2rem' }}>
+                  Specify plot dimensions, setback standards, and spatial requirements. AI Architect will synthesize a buildable, Vastu-evaluated 2D plan in under a second.
+                </p>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    onClick={() => navigate('/editor')}
+                    className="atelier-btn-primary"
+                    style={{ padding: '10px 22px', fontSize: '0.9rem' }}
+                  >
+                    Start First Design <ArrowRight size={15} style={{ marginLeft: '6px' }} />
+                  </button>
+                  <button
+                    onClick={() => navigate('/editor?wizard=true')}
+                    className="atelier-btn-secondary"
+                    style={{ padding: '10px 18px', fontSize: '0.9rem' }}
+                  >
+                    Multi-Floor Wizard
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         ) : filteredProjects.length === 0 ? (
-          <motion.div variants={itemVariants} style={{ textAlign: 'center', padding: '6rem 2rem', background: 'rgba(255, 255, 255, 0.02)', border: '2px dashed rgba(255, 255, 255, 0.1)', borderRadius: '24px' }}>
-            <h3 style={{ fontWeight: 800, fontSize: '1.8rem', marginBottom: '0.5rem', color: 'var(--text-primary)' }}>No matching designs found</h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '1.1rem' }}>Try adjusting your search terms or clearing the Vastu filter.</p>
-          </motion.div>
+          /* Search Empty State */
+          <div style={{ padding: '4rem 2rem', textAlign: 'center', background: 'var(--paper-sheet)', borderRadius: '12px', border: '1px dashed var(--paper-border)' }}>
+            <h3 style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '1.6rem', color: 'var(--ink-primary)', marginBottom: '8px' }}>
+              No matching drawings found in archive.
+            </h3>
+            <p style={{ color: 'var(--ink-annotation)', fontSize: '0.9rem' }}>
+              Try adjusting your search query or toggling off the Vastu filter.
+            </p>
+          </div>
         ) : (
-          <motion.div 
-            variants={containerVariants}
-            style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '2rem' }}
-          >
-            <AnimatePresence>
-              {filteredProjects.map(p => (
-                <motion.div
-                  key={p.id}
-                  variants={itemVariants}
-                  layout
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-                  whileHover={{ y: -8, scale: 1.02, transition: { duration: 0.2 } }}
-                  onClick={() => navigate(`/editor?project=${p.id}`)}
-                  style={{ 
-                    overflow: 'hidden', 
-                    cursor: 'pointer', 
-                    background: 'rgba(255, 255, 255, 0.03)', 
-                    border: '1px solid rgba(255, 255, 255, 0.1)', 
-                    borderRadius: '24px', 
-                    boxShadow: '0 10px 30px rgba(0, 0, 0, 0.1)',
-                    backdropFilter: 'blur(10px)',
-                    display: 'flex',
-                    flexDirection: 'column'
+          /* PROJECT SHOWCASE & ARCHIVE */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3rem' }}>
+            
+            {/* 1. FEATURED PROJECT PRESENTATION (Most Recent Active Design) */}
+            {featuredProject && (
+              <div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--ink-annotation)', letterSpacing: '0.08em', marginBottom: '12px' }}>
+                  FEATURED WORKSPACE // MOST RECENT DESIGN
+                </div>
+
+                <div
+                  onClick={() => navigate(`/editor?project=${featuredProject.id}`)}
+                  style={{
+                    background: 'var(--paper-sheet)',
+                    border: '1px solid var(--paper-border)',
+                    borderRadius: '16px',
+                    padding: '2rem',
+                    boxShadow: 'var(--shadow-elevated)',
+                    cursor: 'pointer',
+                    display: 'grid',
+                    gridTemplateColumns: '1.2fr 1fr',
+                    gap: '2.5rem',
+                    alignItems: 'center',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.borderColor = 'var(--accent-vermilion)';
+                    e.currentTarget.style.boxShadow = 'var(--shadow-hover)';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.borderColor = 'var(--paper-border)';
+                    e.currentTarget.style.boxShadow = 'var(--shadow-elevated)';
                   }}
                 >
-                  {/* Thumbnail */}
-                  <div style={{ height: '220px', background: 'rgba(0,0,0,0.2)', position: 'relative', overflow: 'hidden' }}>
-                    {p.image_url ? (
-                      <motion.img 
-                        whileHover={{ scale: 1.05 }}
-                        transition={{ duration: 0.4 }}
-                        src={p.image_url} 
-                        alt={p.name} 
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                      />
+                  {/* Drawing Sheet Viewport */}
+                  <div style={{ height: '300px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--paper-border)' }}>
+                    {featuredProject.image_url ? (
+                      <img src={featuredProject.image_url} alt={featuredProject.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     ) : (
-                      <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '5rem', opacity: 0.2 }}>⬡</div>
-                    )}
-                    
-                    {/* Vastu Badge */}
-                    {p.layout_data?.vastuScore && p.layout_data.vastuScore > 0 && (
-                      <div style={{ position: 'absolute', top: '16px', right: '16px', background: 'rgba(16, 185, 129, 0.9)', color: 'white', padding: '6px 12px', borderRadius: '20px', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', backdropFilter: 'blur(4px)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
-                        <Sparkles size={14} /> Vastu: {p.layout_data.vastuScore}
-                      </div>
+                      <PaperPlanThumbnail
+                        rooms={featuredProject.layout_data?.floors?.[0]?.rooms || featuredProject.layout_data?.rooms || []}
+                        width={featuredProject.layout_data?.form?.width}
+                        length={featuredProject.layout_data?.form?.length}
+                      />
                     )}
                   </div>
 
-                  {/* Card info */}
-                  <div style={{ padding: '1.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flex: 1 }}>
+                  {/* Portfolio Details */}
+                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%' }}>
                     <div>
-                      <h4 style={{ margin: '0 0 0.5rem', fontWeight: 800, fontSize: '1.25rem', color: 'var(--text-primary)', lineHeight: 1.2 }}>{p.name}</h4>
-                      <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        Created {new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </p>
+                      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', padding: '3px 8px', borderRadius: '4px', background: 'rgba(37,38,34,0.06)', color: 'var(--ink-secondary)' }}>
+                          {(featuredProject.layout_data?.floors?.length ?? 1) > 1 ? `${featuredProject.layout_data?.floors?.length} LEVELS` : '1 LEVEL'}
+                        </span>
+                        {(featuredProject.layout_data?.vastuScore ?? featuredProject.layout_data?.vastuResult?.score ?? 0) > 0 && (
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', padding: '3px 8px', borderRadius: '4px', background: 'var(--success-bg)', color: 'var(--success)', fontWeight: 600 }}>
+                            VASTU {featuredProject.layout_data.vastuScore ?? featuredProject.layout_data.vastuResult?.score}%
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '2rem', color: 'var(--ink-primary)', margin: '0 0 10px 0', lineHeight: 1.2 }}>
+                        {featuredProject.name}
+                      </h3>
+
+                      <div style={{ fontSize: '0.85rem', color: 'var(--ink-secondary)', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1.5rem' }}>
+                        <Calendar size={14} style={{ color: 'var(--ink-annotation)' }} />
+                        <span>Created {new Date(featuredProject.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                      </div>
                     </div>
-                    <motion.button
-                      whileHover={{ scale: 1.1, backgroundColor: 'rgba(239, 68, 68, 0.15)' }}
-                      whileTap={{ scale: 0.9 }}
-                      onClick={e => handleDelete(p.id, e)}
-                      style={{ 
-                        padding: '10px', 
-                        color: '#ef4444', 
-                        borderRadius: '12px', 
-                        border: '1px solid rgba(239, 68, 68, 0.2)',
-                        background: 'rgba(239, 68, 68, 0.05)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        transition: 'all 0.2s'
-                      }}
-                      title="Delete Project"
-                    >
-                      <Trash2 size={18} />
-                    </motion.button>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--paper-border)', paddingTop: '1rem' }}>
+                      <button className="atelier-btn-primary" style={{ padding: '8px 20px', fontSize: '0.85rem' }}>
+                        Resume Drafting <ExternalLink size={14} style={{ marginLeft: '6px' }} />
+                      </button>
+
+                      <button
+                        onClick={e => handleDelete(featuredProject, e)}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--ink-annotation)', cursor: 'pointer', padding: '6px', borderRadius: '4px' }}
+                        title="Delete project"
+                        disabled={deletingId === featuredProject.id}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </motion.div>
+                </div>
+              </div>
+            )}
+
+            {/* 2. RECENT PROJECTS ARCHIVE (Grid of Portfolio Sheets) */}
+            {remainingProjects.length > 0 && (
+              <div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--ink-annotation)', letterSpacing: '0.08em', marginBottom: '16px' }}>
+                  DRAWING ARCHIVE ({remainingProjects.length} DESIGNS)
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '2rem' }}>
+                  {remainingProjects.map((p) => {
+                    const roomsCount = p.layout_data?.floors
+                      ? p.layout_data.floors.reduce((sum, f) => sum + (f.rooms?.length || 0), 0)
+                      : (p.layout_data?.rooms?.length || 0);
+
+                    return (
+                      <div
+                        key={p.id}
+                        onClick={() => navigate(`/editor?project=${p.id}`)}
+                        className="atelier-card"
+                        style={{
+                          overflow: 'hidden',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          borderRadius: '12px'
+                        }}
+                      >
+                        {/* Drawing Preview Sheet */}
+                        <div style={{ height: '200px', borderBottom: '1px solid var(--paper-border)' }}>
+                          {p.image_url ? (
+                            <img src={p.image_url} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <PaperPlanThumbnail
+                              rooms={p.layout_data?.floors?.[0]?.rooms || p.layout_data?.rooms || []}
+                              width={p.layout_data?.form?.width}
+                              length={p.layout_data?.form?.length}
+                            />
+                          )}
+                        </div>
+
+                        {/* Card Info */}
+                        <div style={{ padding: '1.25rem', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' }}>
+                              <h4 style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '1.25rem', color: 'var(--ink-primary)', margin: 0 }}>
+                                {p.name}
+                              </h4>
+                            </div>
+
+                            <div style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--ink-annotation)', marginBottom: '1rem' }}>
+                              {roomsCount} SPACES // {new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--paper-border-soft)', paddingTop: '0.75rem' }}>
+                            <span style={{ fontSize: '0.8rem', color: 'var(--accent-vermilion)', fontWeight: 600 }}>
+                              Open Sheet →
+                            </span>
+
+                            <button
+                              onClick={e => handleDelete(p, e)}
+                              style={{ background: 'transparent', border: 'none', color: 'var(--ink-annotation)', cursor: 'pointer', padding: '4px' }}
+                              title="Delete project"
+                              disabled={deletingId === p.id}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+          </div>
         )}
-      </motion.div>
+
+      </div>
+
+      {/* ── Studio Archive Design Deletion Confirmation Modal ── */}
+      {projectPendingDelete && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(5, 7, 12, 0.65)',
+          backdropFilter: 'blur(4px)',
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1.5rem',
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: '460px',
+            background: 'var(--paper-card, #FFFFFF)',
+            borderRadius: '12px',
+            border: '1px solid var(--paper-border, #E7E1D5)',
+            boxShadow: '0 20px 45px rgba(0,0,0,0.2)',
+            padding: '1.5rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '8px',
+                background: '#FEF2F2',
+                border: '1px solid #FCA5A5',
+                color: '#DC2626',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <Trash2 size={18} />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--ink-primary, #252622)', fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic' }}>
+                  Delete Architectural Design?
+                </h4>
+                <span style={{ fontSize: '0.74rem', color: 'var(--ink-annotation, #777970)', fontFamily: 'var(--font-mono, monospace)' }}>
+                  ID: {projectPendingDelete.id}
+                </span>
+              </div>
+            </div>
+
+            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--ink-secondary, #474943)', lineHeight: 1.5 }}>
+              Are you sure you want to permanently delete <strong>"{projectPendingDelete.name}"</strong> from your studio archive? This will remove all layout snapshots and furniture arrangements.
+            </p>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => setProjectPendingDelete(null)}
+                disabled={deletingId !== null}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--paper-border, #E7E1D5)',
+                  background: 'transparent',
+                  color: 'var(--ink-secondary, #474943)',
+                  fontSize: '0.82rem',
+                  fontFamily: 'var(--font-mono, monospace)',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={confirmDeleteProject}
+                disabled={deletingId !== null}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#DC2626',
+                  color: '#FFFFFF',
+                  fontSize: '0.82rem',
+                  fontFamily: 'var(--font-mono, monospace)',
+                  cursor: deletingId !== null ? 'not-allowed' : 'pointer',
+                  fontWeight: 700,
+                  opacity: deletingId !== null ? 0.7 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                {deletingId !== null ? 'Deleting...' : 'Delete Design'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

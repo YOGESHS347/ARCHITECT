@@ -1,70 +1,89 @@
 :root {
-  --font-primary: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  /* ═══════════════════════════════════════════════════════════════════════
+     THE ARCHITECTURAL ATELIER — TYPOGRAPHY SYSTEM
+  ═══════════════════════════════════════════════════════════════════════ */
+  --font-serif: 'Newsreader', 'Times New Roman', Georgia, serif;
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  --font-primary: var(--font-sans);
 
-  /* Surfaces — Precision Blueprint White Theme */
-  --bg-primary:   #F8FAFC;
-  --bg-secondary: #FFFFFF;
-  --bg-card:      #FFFFFF;
+  /* ═══════════════════════════════════════════════════════════════════════
+     MATERIALS & PALETTE — PAPER, INK & TACTILE ACCENTS
+  ═══════════════════════════════════════════════════════════════════════ */
+  /* Paper Surfaces */
+  --paper-warm:        #F3F0E7; /* warm sketchbook & editorial foundation */
+  --paper-sheet:       #FAF8F2; /* clean drawing sheet & card surfaces */
+  --paper-tracing:     #E7E1D5; /* translucent tracing paper layers */
+  --paper-crisp:       #FFFFFF; /* pure white drafting paper */
+  --paper-border:      rgba(37, 38, 34, 0.12);
+  --paper-border-soft: rgba(37, 38, 34, 0.06);
 
-  /* Minimal Shadows */
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-elevated: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --shadow-elevated-hover: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-  --shadow-inset: none;
-  
-  /* Text */
-  --text-primary:   #0F172A;
-  --text-secondary: #475569;
-  --text-muted:     #94A3B8;
+  /* Architectural Ink */
+  --ink-primary:       #252622; /* structural ink / deep warm graphite */
+  --ink-secondary:     #474943; /* partition ink / readable body copy */
+  --ink-annotation:    #777970; /* drafting annotations & dimension markers */
+  --ink-muted:         #A1A399; /* light grid & subtle guide marks */
+  --ink-faint:         rgba(37, 38, 34, 0.05);
 
-  /* Accent — Vibrant Blue */
-  --accent-color:    #2563EB;
-  --accent-fg:       #FFFFFF;
-  --accent-glow: rgba(59, 130, 246, 0.2);
+  /* Technical & Material Accents */
+  --accent-cobalt:     #365FA8; /* blueprint measurement, CAD active states */
+  --accent-vermilion:  #D85740; /* editorial vermilion / primary CTA & highlights */
+  --accent-sage:       #A1AE97; /* architectural sage / landscape, Vastu harmony */
+  --accent-brass:      #B89A64; /* restrained brass / solar azimuth & elevation */
 
-  /* Fallback aliases for legacy App.css components (to automatically upgrade them) */
-  --glass-bg: var(--bg-card);
-  --glass-border: var(--border-color);
-  --glass-hover: var(--surface-hover);
-  --glass-shadow: var(--shadow-sm);
-  --input-shadow: none;
+  /* Studio Workspace Surfaces (for dedicated drafting & 3D viewports) */
+  --studio-graphite:   #272A29;
+  --studio-deep:       #1B1D1C;
+  --studio-border:     #3A3E3C;
 
-  /* CTA */
-  --cta-color:       #2563EB;
-  --cta-hover:       #1D4ED8;
+  /* Semantic UI Tokens */
+  --bg-primary:        var(--paper-warm);
+  --bg-secondary:      var(--paper-sheet);
+  --bg-elevated:       var(--paper-crisp);
+  --bg-card:           var(--paper-sheet);
+  --bg-card-hover:     var(--paper-crisp);
 
-  /* Inputs */
-  --input-bg:     #FFFFFF;
-  --input-shadow: var(--shadow-sm);
-  --input-border: #E2E8F0;
-  
-  /* Borders */
-  --border-color: #F3F4F6;
-  --border-focus: #2563EB;
+  --border-color:      var(--paper-border);
+  --border-subtle:     var(--paper-border-soft);
+  --border-focus:      var(--accent-cobalt);
 
-  /* Nav */
-  --nav-bg:       #FFFFFF;
-  --nav-border:   #F3F4F6;
+  --text-primary:      var(--ink-primary);
+  --text-secondary:    var(--ink-secondary);
+  --text-muted:        var(--ink-annotation);
 
-  /* Semantic status */
-  --success:      #10B981;
-  --error:        #EF4444;
-  --warning:      #F59E0B;
-  --success-text: #047857;
-  --error-text:   #B91C1C;
-  --success-bg:   #ECFDF5;
-  --success-border: #A7F3D0;
+  --accent-color:      var(--accent-vermilion);
+  --accent-cyan:       var(--accent-cobalt);
+  --accent-violet:     var(--accent-vermilion);
+  --cta-color:         var(--accent-vermilion);
+  --cta-hover:         #B84530;
+
+  --input-bg:          var(--paper-crisp);
+  --input-border:      rgba(37, 38, 34, 0.16);
+
+  /* Status Tokens */
+  --success:           #437A5D; /* organic architectural sage green */
+  --warning:           #C27803; /* architectural amber */
+  --error:             #D85740; /* vermilion red */
+  --success-text:      #437A5D;
+  --error-text:        #D85740;
+  --success-bg:        rgba(67, 122, 93, 0.08);
+  --success-border:    rgba(67, 122, 93, 0.25);
+
+  /* Tactile Paper Elevation */
+  --shadow-sm:         0 1px 3px rgba(37, 38, 34, 0.06);
+  --shadow-elevated:   0 4px 16px rgba(37, 38, 34, 0.08), 0 1px 2px rgba(37, 38, 34, 0.04);
+  --shadow-hover:      0 8px 24px rgba(37, 38, 34, 0.12), 0 2px 6px rgba(37, 38, 34, 0.06);
+  --shadow-dossier:    0 20px 40px -10px rgba(37, 38, 34, 0.12);
 
   /* Scrollbar */
-  --scrollbar-track: transparent;
-  --scrollbar-thumb: #CBD5E1;
+  --scrollbar-track:   var(--paper-warm);
+  --scrollbar-thumb:   rgba(37, 38, 34, 0.2);
 
   color-scheme: light;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   BASE STYLES
+   BASE STYLES & DRAFTING PAPER TEXTURE
 ═══════════════════════════════════════════════════════════════════════ */
 *,
 *::before,
@@ -77,170 +96,187 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--font-primary);
-  line-height: 1.5;
+  line-height: 1.6;
   font-weight: 400;
-  font-synthesis: none;
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Subtle, organic drafting paper grid */
 body {
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
-  transition: background-color 0.25s ease, color 0.25s ease;
+  background-image: 
+    linear-gradient(rgba(37, 38, 34, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37, 38, 34, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-position: -1px -1px;
 }
 
-h1, h2, h3, h4, h5, h6 {
-  margin-top: 0;
+/* Typography styles */
+h1, h2, h3, h4 {
+  color: var(--ink-primary);
   font-weight: 600;
-  letter-spacing: -0.015em;
-  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin-top: 0;
 }
 
+.editorial-headline {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+.technical-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-annotation);
+}
+
+/* Buttons: Tactile Architectural Buttons */
 button {
-  font-family: var(--font-primary);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: var(--font-sans);
   cursor: pointer;
   border: none;
   outline: none;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-input, select, textarea {
-  font-family: var(--font-primary);
-  outline: none;
-  border: 1px solid var(--input-border);
-  background: var(--input-bg);
-  color: var(--text-primary);
-  box-shadow: var(--shadow-sm);
-  border-radius: 4px;
-  padding: 8px 12px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-input:focus, select:focus, textarea:focus {
-  border-color: var(--accent-color);
-  box-shadow: var(--accent-glow);
-}
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: var(--scrollbar-track); }
-::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
-
-/* Smooth theme transition */
-div, header, nav, aside, main, section, footer, button, input, select, a {
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.15s ease, box-shadow 0.2s ease, transform 0.1s ease;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   MODERN PANELS & BUTTONS (Replacing Neu-styles)
-═══════════════════════════════════════════════════════════════════════ */
-
-/* Replaces neu-panel */
-.neu-panel {
-  background: var(--bg-card);
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-sm);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-.neu-panel:hover {
-  box-shadow: var(--shadow-elevated);
-}
-
-/* Replaces neu-panel-inset (no longer inset, just a slightly different card) */
-.neu-panel-inset {
-  background: var(--bg-primary);
-  border-radius: 8px;
-  border: 1px solid var(--border-color);
-}
-
-/* Primary modern button (replaces neu-btn) */
-.neu-btn, .primary-btn {
+.atelier-btn-primary, .primary-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--accent-color);
-  color: var(--accent-fg);
+  background: var(--accent-vermilion);
+  color: #FFFFFF;
   font-weight: 600;
-  border-radius: 4px;
-  padding: 0.5rem 1rem;
-  border: none;
-  box-shadow: var(--shadow-sm);
-  transition: all 0.2s ease;
-  font-size: 0.875rem;
+  border-radius: 6px;
+  padding: 0.65rem 1.4rem;
+  border: 1px solid rgba(216, 87, 64, 0.9);
+  box-shadow: 0 2px 6px rgba(216, 87, 64, 0.25);
+  font-size: 0.9rem;
+  letter-spacing: 0.01em;
 }
-.neu-btn:hover:not(:disabled), .primary-btn:hover:not(:disabled) {
-  background: var(--cta-hover);
+.atelier-btn-primary:hover:not(:disabled), .primary-btn:hover:not(:disabled) {
+  background: #C44630;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(216, 87, 64, 0.35);
+}
+.atelier-btn-primary:active:not(:disabled), .primary-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.atelier-btn-secondary, .secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper-sheet);
+  color: var(--ink-primary);
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 0.65rem 1.3rem;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  font-size: 0.9rem;
+}
+.atelier-btn-secondary:hover:not(:disabled), .secondary-btn:hover:not(:disabled) {
+  background: var(--paper-crisp);
+  border-color: var(--ink-secondary);
   transform: translateY(-1px);
   box-shadow: var(--shadow-elevated);
 }
-.neu-btn:active:not(:disabled), .primary-btn:active:not(:disabled) {
-  transform: translateY(0);
-  box-shadow: none;
-}
-.neu-btn:disabled, .primary-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
-/* Ghost modern button (replaces neu-btn-ghost) */
-.neu-btn-ghost, .btn-ghost {
+.atelier-btn-ghost, .btn-ghost {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  color: var(--text-secondary);
-  font-weight: 500;
-  border-radius: 4px;
-  padding: 0.5rem 1rem;
-  border: 2px solid #d1d5db; /* Thicker, visible border */
-  transition: all 0.2s ease;
+  color: var(--ink-secondary);
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 0.55rem 1rem;
+  border: 1px solid transparent;
 }
-.neu-btn-ghost:hover:not(:disabled), .btn-ghost:hover:not(:disabled) {
-  color: var(--text-primary);
-  background: var(--bg-primary);
-  border-color: #9ca3af; /* Darker border on hover */
+.atelier-btn-ghost:hover:not(:disabled), .btn-ghost:hover:not(:disabled) {
+  color: var(--ink-primary);
+  background: rgba(37, 38, 34, 0.05);
 }
-.neu-btn-ghost:active:not(:disabled), .btn-ghost:active:not(:disabled) {
-  background: #f3f4f6;
-}
-.neu-input {
+
+/* Inputs */
+input, select, textarea {
+  font-family: var(--font-sans);
+  outline: none;
   border: 1px solid var(--input-border);
   background: var(--input-bg);
-  border-radius: 4px;
-  padding: 10px 14px;
-  color: var(--text-primary);
-  width: 100%;
+  color: var(--ink-primary);
+  border-radius: 6px;
+  padding: 9px 12px;
+  font-size: 0.92rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
-.neu-input:focus {
-  border-color: var(--accent-color);
-  box-shadow: var(--accent-glow);
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent-cobalt);
+  box-shadow: 0 0 0 3px rgba(54, 95, 168, 0.12);
+}
+
+/* Atelier Paper Card */
+.atelier-card, .hud-card, .neu-panel {
+  background: var(--paper-sheet);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.atelier-card:hover, .hud-card:hover, .neu-panel:hover {
+  border-color: rgba(37, 38, 34, 0.24);
+  box-shadow: var(--shadow-elevated);
+}
+
+/* Studio Dark Mode for 3D Viewport */
+.studio-dark {
+  background: var(--studio-deep);
+  color: var(--paper-sheet);
+}
+.studio-dark .atelier-card {
+  background: var(--studio-graphite);
+  border-color: var(--studio-border);
+  color: var(--paper-sheet);
+}
+
+/* Vector path drawing animation */
+@keyframes sketchDraw {
+  from {
+    stroke-dashoffset: 1200;
+    opacity: 0.4;
+  }
+  to {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+.animate-sketch-draw {
+  stroke-dasharray: 1200;
+  stroke-dashoffset: 1200;
+  animation: sketchDraw 2.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   LAYOUT
+   ACCESSIBILITY: PREFERS REDUCED MOTION
 ═══════════════════════════════════════════════════════════════════════ */
-.app-container {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-}
-.content-grid {
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  gap: 1.5rem;
-  padding: 1.5rem 2rem;
-  flex: 1;
-  height: calc(100vh - 80px);
-  overflow: hidden;
-}
-/* When viewing a plan, use a 3-column professional layout */
-.content-grid.active-plan-view {
-  grid-template-columns: 300px 1fr 320px;
-  gap: 0;
-  padding: 0;
-  height: calc(100vh - 65px);
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-sketch-draw {
+    stroke-dashoffset: 0 !important;
+    animation: none !important;
+  }
 }

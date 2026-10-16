@@ -154,70 +154,87 @@ export default function ComplianceSidebar({
     }
   };
 
-  const getBadgeColor = (score: number) => {
-    if (score >= 80) return 'var(--success)';
-    if (score >= 50) return 'var(--warning)';
-    return 'var(--error)';
+  const getBadgeStyle = (score: number) => {
+    if (score >= 80) return { bg: 'rgba(161, 174, 151, 0.25)', color: '#252622', border: '#A1AE97' };
+    if (score >= 50) return { bg: 'rgba(184, 154, 100, 0.2)', color: '#252622', border: '#B89A64' };
+    return { bg: 'rgba(216, 87, 64, 0.15)', color: '#D85740', border: '#D85740' };
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
       {/* Vastu Panel */}
       {vastuResult && vastuResult.rules.length > 0 && (
-        <div className="neu-panel" style={{ padding: '0', overflow: 'hidden' }}>
+        <div style={{ background: '#FAF8F2', border: '1px solid #E7E1D5', borderRadius: '6px', overflow: 'hidden' }}>
           <div 
             onClick={() => setVastuOpen(!vastuOpen)}
-            style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: vastuOpen ? 'var(--input-bg)' : 'transparent', transition: 'all 0.2s' }}
+            style={{ padding: '0.85rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: vastuOpen ? '#F3F0E7' : 'transparent', transition: 'all 0.15s' }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              <span style={{ fontSize: '1.2rem' }}>🧭</span> Vastu Analysis
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, fontSize: '0.88rem', color: '#252622' }}>
+              <span>🧭</span> Vastu Analysis
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 800, color: getBadgeColor(vastuScore), background: 'var(--bg-primary)', boxShadow: 'var(--shadow-inset)' }}>
-                {vastuScore}/100
-              </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{vastuOpen ? '▲' : '▼'}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              {(() => {
+                const b = getBadgeStyle(vastuScore);
+                return (
+                  <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", color: b.color, background: b.bg, border: `1px solid ${b.border}` }}>
+                    {vastuScore}/100
+                  </span>
+                );
+              })()}
+              <span style={{ fontSize: '0.65rem', color: '#777970' }}>{vastuOpen ? '▲' : '▼'}</span>
             </div>
           </div>
           
           {vastuOpen && (
-            <div style={{ padding: '1rem', borderTop: '1px solid var(--border-color)', background: 'var(--bg-primary)' }}>
+            <div style={{ padding: '1rem', borderTop: '1px solid #E7E1D5', background: '#FAF8F2' }}>
               {vastuScore < 100 && (
                 <button
                   onClick={handleVastuFix}
                   disabled={vastuFixing}
-                  className="neu-btn"
-                  style={{ width: '100%', marginBottom: '1rem', padding: '10px', fontSize: '0.85rem' }}
+                  style={{
+                    width: '100%',
+                    marginBottom: '0.85rem',
+                    padding: '0.5rem',
+                    fontSize: '0.78rem',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontWeight: 600,
+                    background: '#252622',
+                    color: '#FAF8F2',
+                    border: '1px solid #252622',
+                    borderRadius: '4px',
+                    cursor: vastuFixing ? 'not-allowed' : 'pointer'
+                  }}
                 >
-                  {vastuFixing ? '🧭 Revising topology…' : '✨ Auto-Fix Vastu (AI)'}
+                  {vastuFixing ? 'Revising orientation…' : 'Optimize Vastu Layout (AI)'}
                 </button>
               )}
 
               {/* Before/after result banner */}
               {lastFixResult && lastFixResult.status !== 'already_optimal' && (
-                <div className="neu-panel-inset" style={{ padding: '0.75rem', marginBottom: '1rem' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }}>
-                    <strong>Score:</strong> {lastFixResult.before_score} → <strong style={{ color: 'var(--success)' }}>{lastFixResult.after_score}</strong>
+                <div style={{ padding: '0.75rem', marginBottom: '0.85rem', background: '#FFFFFF', border: '1px solid #E7E1D5', borderRadius: '4px' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#252622', fontFamily: "'JetBrains Mono', monospace" }}>
+                    Score: {lastFixResult.before_score} → <strong style={{ color: '#252622' }}>{lastFixResult.after_score}</strong>
                   </div>
                   {lastFixResult.design_rationale && (
-                    <div style={{ marginTop: '0.4rem', opacity: 0.8, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{lastFixResult.design_rationale}</div>
+                    <div style={{ marginTop: '0.35rem', fontSize: '0.72rem', color: '#777970', lineHeight: 1.4 }}>{lastFixResult.design_rationale}</div>
                   )}
                 </div>
               )}
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {vastuResult.rules.map((r, i) => {
                   if (r.max === 0) return null;
-                  const icon = r.status === 'pass' ? '✅' : r.status === 'warn' ? '⚠️' : '❌';
+                  const icon = r.status === 'pass' ? '✓' : r.status === 'warn' ? '!' : '×';
+                  const iconColor = r.status === 'pass' ? '#252622' : r.status === 'warn' ? '#B89A64' : '#D85740';
                   return (
-                    <div key={i} className="neu-panel-inset" style={{ padding: '0.75rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem', alignItems: 'center' }}>
-                        <strong style={{ color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
-                          <span>{icon}</span>{r.rule}
+                    <div key={i} style={{ padding: '0.65rem', background: '#FFFFFF', border: '1px solid #E7E1D5', borderRadius: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem', alignItems: 'center' }}>
+                        <strong style={{ color: '#252622', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 600 }}>
+                          <span style={{ color: iconColor, fontWeight: 800 }}>{icon}</span>{r.rule}
                         </strong>
-                        <span style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.8rem' }}>{r.points}/{r.max}</span>
+                        <span style={{ color: '#777970', fontWeight: 600, fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace" }}>{r.points}/{r.max}</span>
                       </div>
-                      <div style={{ color: 'var(--text-secondary)', lineHeight: 1.4, fontSize: '0.75rem' }}>{r.detail}</div>
+                      <div style={{ color: '#777970', lineHeight: 1.4, fontSize: '0.72rem' }}>{r.detail}</div>
                     </div>
                   );
                 })}
@@ -229,58 +246,75 @@ export default function ComplianceSidebar({
 
       {/* NBC Compliance Panel */}
       {nbcResult && nbcResult.rules.length > 0 && (
-        <div className="neu-panel" style={{ padding: '0', overflow: 'hidden' }}>
+        <div style={{ background: '#FAF8F2', border: '1px solid #E7E1D5', borderRadius: '6px', overflow: 'hidden' }}>
           <div 
             onClick={() => setNbcOpen(!nbcOpen)}
-            style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: nbcOpen ? 'var(--input-bg)' : 'transparent', transition: 'all 0.2s' }}
+            style={{ padding: '0.85rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: nbcOpen ? '#F3F0E7' : 'transparent', transition: 'all 0.15s' }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              <span style={{ fontSize: '1.2rem' }}>🏛</span> NBC 2016 Compliance
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, fontSize: '0.88rem', color: '#252622' }}>
+              <span>🏛</span> NBC 2016 Compliance
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 800, color: getBadgeColor(nbcResult.score), background: 'var(--bg-primary)', boxShadow: 'var(--shadow-inset)' }}>
-                {nbcResult.score}/100
-              </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{nbcOpen ? '▲' : '▼'}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              {(() => {
+                const b = getBadgeStyle(nbcResult.score);
+                return (
+                  <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", color: b.color, background: b.bg, border: `1px solid ${b.border}` }}>
+                    {nbcResult.score}/100
+                  </span>
+                );
+              })()}
+              <span style={{ fontSize: '0.65rem', color: '#777970' }}>{nbcOpen ? '▲' : '▼'}</span>
             </div>
           </div>
           {nbcOpen && (
-            <div style={{ padding: '1rem', borderTop: '1px solid var(--border-color)', background: 'var(--bg-primary)' }}>
+            <div style={{ padding: '1rem', borderTop: '1px solid #E7E1D5', background: '#FAF8F2' }}>
               {nbcResult.score < 100 && (
                 <button
                   onClick={handleNbcFix}
                   disabled={nbcFixing}
-                  className="neu-btn"
-                  style={{ width: '100%', marginBottom: '1rem', padding: '10px', fontSize: '0.85rem' }}
+                  style={{
+                    width: '100%',
+                    marginBottom: '0.85rem',
+                    padding: '0.5rem',
+                    fontSize: '0.78rem',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontWeight: 600,
+                    background: '#252622',
+                    color: '#FAF8F2',
+                    border: '1px solid #252622',
+                    borderRadius: '4px',
+                    cursor: nbcFixing ? 'not-allowed' : 'pointer'
+                  }}
                 >
-                  {nbcFixing ? '🏗 Revising topology…' : '🔧 Auto-Fix NBC 2016 (AI)'}
+                  {nbcFixing ? 'Revising geometry…' : 'Apply NBC 2016 Fixes (AI)'}
                 </button>
               )}
 
               {lastNbcFixResult && lastNbcFixResult.status !== 'already_optimal' && (
-                <div className="neu-panel-inset" style={{ padding: '0.75rem', marginBottom: '1rem' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }}>
-                    <strong>Score:</strong> {lastNbcFixResult.before_score} → <strong style={{ color: 'var(--success)' }}>{lastNbcFixResult.after_score}</strong>
+                <div style={{ padding: '0.75rem', marginBottom: '0.85rem', background: '#FFFFFF', border: '1px solid #E7E1D5', borderRadius: '4px' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#252622', fontFamily: "'JetBrains Mono', monospace" }}>
+                    Score: {lastNbcFixResult.before_score} → <strong style={{ color: '#252622' }}>{lastNbcFixResult.after_score}</strong>
                   </div>
                   {lastNbcFixResult.design_rationale && (
-                    <div style={{ marginTop: '0.4rem', opacity: 0.8, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{lastNbcFixResult.design_rationale}</div>
+                    <div style={{ marginTop: '0.35rem', fontSize: '0.72rem', color: '#777970', lineHeight: 1.4 }}>{lastNbcFixResult.design_rationale}</div>
                   )}
                 </div>
               )}
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {nbcResult.rules.map((r, i) => {
                   if (r.max === 0) return null;
-                  const icon = r.status === 'pass' ? '✅' : r.status === 'warn' ? '⚠️' : '❌';
+                  const icon = r.status === 'pass' ? '✓' : r.status === 'warn' ? '!' : '×';
+                  const iconColor = r.status === 'pass' ? '#252622' : r.status === 'warn' ? '#B89A64' : '#D85740';
                   return (
-                    <div key={i} className="neu-panel-inset" style={{ padding: '0.75rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem', alignItems: 'center' }}>
-                        <strong style={{ color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
-                          <span>{icon}</span>{r.rule}
+                    <div key={i} style={{ padding: '0.65rem', background: '#FFFFFF', border: '1px solid #E7E1D5', borderRadius: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem', alignItems: 'center' }}>
+                        <strong style={{ color: '#252622', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 600 }}>
+                          <span style={{ color: iconColor, fontWeight: 800 }}>{icon}</span>{r.rule}
                         </strong>
-                        <span style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.8rem' }}>{r.points}/{r.max}</span>
+                        <span style={{ color: '#777970', fontWeight: 600, fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace" }}>{r.points}/{r.max}</span>
                       </div>
-                      <div style={{ color: 'var(--text-secondary)', lineHeight: 1.4, fontSize: '0.75rem' }}>{r.detail}</div>
+                      <div style={{ color: '#777970', lineHeight: 1.4, fontSize: '0.72rem' }}>{r.detail}</div>
                     </div>
                   );
                 })}
@@ -292,33 +326,33 @@ export default function ComplianceSidebar({
 
       {/* Energy & Environment Panel */}
       {((energyResult && energyResult.rules.length > 0) || sunlightResult) && (
-        <div className="neu-panel" style={{ padding: '0', overflow: 'hidden' }}>
+        <div style={{ background: '#FAF8F2', border: '1px solid #E7E1D5', borderRadius: '6px', overflow: 'hidden' }}>
           <div 
             onClick={() => setEnergyOpen(!energyOpen)}
-            style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: energyOpen ? 'var(--input-bg)' : 'transparent', transition: 'all 0.2s' }}
+            style={{ padding: '0.85rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: energyOpen ? '#F3F0E7' : 'transparent', transition: 'all 0.15s' }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              <span style={{ fontSize: '1.2rem' }}>🌱</span> Climate & Environmental Analysis
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, fontSize: '0.88rem', color: '#252622' }}>
+              <span>🌱</span> Climate & Environmental
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 800, color: getBadgeColor(energyResult?.score || sunlightResult?.score || 0), background: 'var(--bg-primary)', boxShadow: 'var(--shadow-inset)' }}>
-                {energyResult ? `Grade ${energyResult.grade}` : sunlightResult ? `Grade ${sunlightResult.grade}` : ''}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", color: '#252622', background: 'rgba(161, 174, 151, 0.25)', border: '1px solid #A1AE97' }}>
+                {energyResult ? `Grade ${energyResult.grade}` : sunlightResult ? `Grade ${sunlightResult.grade}` : 'Active'}
               </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{energyOpen ? '▲' : '▼'}</span>
+              <span style={{ fontSize: '0.65rem', color: '#777970' }}>{energyOpen ? '▲' : '▼'}</span>
             </div>
           </div>
           {energyOpen && (
-            <div style={{ padding: '1rem', borderTop: '1px solid var(--border-color)', background: 'var(--bg-primary)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <div style={{ padding: '1rem', borderTop: '1px solid #E7E1D5', background: '#FAF8F2' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 
                 {/* Sunlight Insights */}
                 {sunlightResult?.insights && sunlightResult.insights.length > 0 && (
                   <>
-                    <strong style={{ fontSize: '0.85rem', color: 'var(--text-primary)', marginTop: '0.5rem' }}>Natural Light Insights</strong>
+                    <strong style={{ fontSize: '0.8rem', color: '#252622', marginTop: '0.25rem', fontWeight: 600 }}>Natural Daylight Assessment</strong>
                     {sunlightResult.insights.map((insight, i) => (
-                      <div key={`sun-${i}`} className="neu-panel-inset" style={{ padding: '0.75rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
-                        <span style={{ fontSize: '1rem', marginTop: '-2px' }}>☀️</span>
-                        <div style={{ color: 'var(--text-secondary)', lineHeight: 1.4, fontSize: '0.8rem' }}>{insight}</div>
+                      <div key={`sun-${i}`} style={{ padding: '0.65rem', background: '#FFFFFF', border: '1px solid #E7E1D5', borderRadius: '4px', display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+                        <span style={{ fontSize: '0.85rem' }}>☀️</span>
+                        <div style={{ color: '#777970', lineHeight: 1.4, fontSize: '0.72rem' }}>{insight}</div>
                       </div>
                     ))}
                   </>
@@ -327,19 +361,20 @@ export default function ComplianceSidebar({
                 {/* Energy Rules */}
                 {energyResult?.rules && energyResult.rules.length > 0 && (
                   <>
-                    <strong style={{ fontSize: '0.85rem', color: 'var(--text-primary)', marginTop: '0.5rem' }}>Efficiency Checklist</strong>
+                    <strong style={{ fontSize: '0.8rem', color: '#252622', marginTop: '0.25rem', fontWeight: 600 }}>Thermal Efficiency Checklist</strong>
                     {energyResult.rules.map((r, i) => {
                       if (r.max === 0) return null;
-                      const icon = r.status === 'pass' ? '✅' : r.status === 'warn' ? '⚠️' : '❌';
+                      const icon = r.status === 'pass' ? '✓' : r.status === 'warn' ? '!' : '×';
+                      const iconColor = r.status === 'pass' ? '#252622' : r.status === 'warn' ? '#B89A64' : '#D85740';
                       return (
-                        <div key={`energy-${i}`} className="neu-panel-inset" style={{ padding: '0.75rem' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem', alignItems: 'center' }}>
-                            <strong style={{ color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}>
-                              <span>{icon}</span>{r.rule}
+                        <div key={`energy-${i}`} style={{ padding: '0.65rem', background: '#FFFFFF', border: '1px solid #E7E1D5', borderRadius: '4px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem', alignItems: 'center' }}>
+                            <strong style={{ color: '#252622', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 600 }}>
+                              <span style={{ color: iconColor, fontWeight: 800 }}>{icon}</span>{r.rule}
                             </strong>
-                            <span style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.8rem' }}>{r.points}/{r.max}</span>
+                            <span style={{ color: '#777970', fontWeight: 600, fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace" }}>{r.points}/{r.max}</span>
                           </div>
-                          <div style={{ color: 'var(--text-secondary)', lineHeight: 1.4, fontSize: '0.75rem' }}>{r.detail}</div>
+                          <div style={{ color: '#777970', lineHeight: 1.4, fontSize: '0.72rem' }}>{r.detail}</div>
                         </div>
                       );
                     })}
@@ -354,72 +389,71 @@ export default function ComplianceSidebar({
       
       {/* Bill of Materials (BOM) Estimation Panel */}
       {bomResult && (
-        <div className="neu-panel" style={{ padding: '0', overflow: 'hidden' }}>
+        <div style={{ background: '#FAF8F2', border: '1px solid #E7E1D5', borderRadius: '6px', overflow: 'hidden' }}>
           <div 
             onClick={() => setBomOpen(!bomOpen)}
-            style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: bomOpen ? 'var(--input-bg)' : 'transparent', transition: 'all 0.2s' }}
+            style={{ padding: '0.85rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: bomOpen ? '#F3F0E7' : 'transparent', transition: 'all 0.15s' }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              <span style={{ fontSize: '1.2rem' }}>💰</span> Cost Estimate (BOM)
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, fontSize: '0.88rem', color: '#252622' }}>
+              <span>💰</span> Cost Estimate (BOM)
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 800, color: 'var(--success)', background: 'var(--bg-primary)', boxShadow: 'var(--shadow-inset)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", color: '#252622', background: 'rgba(184, 154, 100, 0.2)', border: '1px solid #B89A64' }}>
                 ₹{bomResult.summary.grand_total.toLocaleString('en-IN')}
               </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{bomOpen ? '▲' : '▼'}</span>
+              <span style={{ fontSize: '0.65rem', color: '#777970' }}>{bomOpen ? '▲' : '▼'}</span>
             </div>
           </div>
           {bomOpen && (
-            <div style={{ padding: '1rem', borderTop: '1px solid var(--border-color)', background: 'var(--bg-primary)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ padding: '1rem', borderTop: '1px solid #E7E1D5', background: '#FAF8F2' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <label style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>Finish Quality</label>
+                    <label style={{ fontSize: '0.78rem', fontWeight: 600, color: '#252622' }}>Specification Tier</label>
                     <div style={{ position: 'relative' }}>
-                      <select value={tier} onChange={handleTierChange} disabled={bomRecalculating} className="neu-input" style={{ padding: '0.4rem 1.8rem 0.4rem 0.8rem', fontSize: '0.8rem', appearance: 'none', width: '120px' }}>
+                      <select value={tier} onChange={handleTierChange} disabled={bomRecalculating} style={{ padding: '0.35rem 1.6rem 0.35rem 0.75rem', fontSize: '0.75rem', fontFamily: "'JetBrains Mono', monospace", appearance: 'none', width: '120px', background: '#FFFFFF', border: '1px solid #E7E1D5', borderRadius: '4px', color: '#252622' }}>
                           <option value="economy">Economy</option>
                           <option value="standard">Standard</option>
                           <option value="premium">Premium</option>
                       </select>
-                      <div style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-secondary)', fontSize: '0.6rem' }}>▼</div>
+                      <div style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#777970', fontSize: '0.6rem' }}>▼</div>
                     </div>
                 </div>
                 
-                {bomRecalculating && <div style={{ fontSize: '0.8rem', color: 'var(--accent-color)', fontWeight: 600, textAlign: 'center' }}>Recalculating...</div>}
+                {bomRecalculating && <div style={{ fontSize: '0.75rem', color: '#777970', textAlign: 'center' }}>Recalculating rates…</div>}
                 
-                <div className="neu-panel-inset" style={{ padding: '1rem', opacity: bomRecalculating ? 0.5 : 1 }}>
-                  <strong style={{ display: 'block', marginBottom: '0.75rem', color: 'var(--text-primary)', fontSize: '0.9rem' }}>Overall Summary (2026 Costs)</strong>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
-                    <span>Total Area:</span> <strong style={{ color: 'var(--text-primary)' }}>{bomResult.summary.total_area_sqft} sqft</strong>
+                <div style={{ padding: '0.85rem', background: '#FFFFFF', border: '1px solid #E7E1D5', borderRadius: '4px', opacity: bomRecalculating ? 0.5 : 1 }}>
+                  <strong style={{ display: 'block', marginBottom: '0.6rem', color: '#252622', fontSize: '0.82rem', fontWeight: 600 }}>Construction Cost Summary</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#777970', marginBottom: '0.35rem' }}>
+                    <span>Total Area:</span> <strong style={{ color: '#252622' }}>{bomResult.summary.total_area_sqft} sqft</strong>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
-                    <span>Rate per sqft:</span> <strong style={{ color: 'var(--text-primary)' }}>₹{bomResult.summary.rate_per_sqft.toLocaleString('en-IN')}</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#777970', marginBottom: '0.35rem' }}>
+                    <span>Rate per sqft:</span> <strong style={{ color: '#252622' }}>₹{bomResult.summary.rate_per_sqft.toLocaleString('en-IN')}</strong>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.6rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.6rem', marginBottom: '0.4rem' }}>
-                    <span>Material Total:</span> <strong style={{ color: 'var(--text-primary)' }}>₹{bomResult.summary.material_total.toLocaleString('en-IN')}</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#777970', marginTop: '0.5rem', borderTop: '1px solid #E7E1D5', paddingTop: '0.5rem', marginBottom: '0.35rem' }}>
+                    <span>Material:</span> <strong style={{ color: '#252622' }}>₹{bomResult.summary.material_total.toLocaleString('en-IN')}</strong>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                    <span>Labour Total:</span> <strong style={{ color: 'var(--text-primary)' }}>₹{bomResult.summary.labour_total.toLocaleString('en-IN')}</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#777970' }}>
+                    <span>Labour:</span> <strong style={{ color: '#252622' }}>₹{bomResult.summary.labour_total.toLocaleString('en-IN')}</strong>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', marginTop: '0.6rem', paddingTop: '0.6rem', borderTop: '2px solid var(--border-color)', fontWeight: 800, color: 'var(--accent-color)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #252622', fontWeight: 700, color: '#252622', fontFamily: "'JetBrains Mono', monospace" }}>
                     <span>Grand Total:</span> <span>₹{bomResult.summary.grand_total.toLocaleString('en-IN')}</span>
                   </div>
                 </div>
 
                 <div>
-                  <strong style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.5rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Room Breakdown</strong>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <strong style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.4rem', color: '#777970', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Room Schedule</strong>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                     {bomResult.rooms.map((room, i) => (
-                      <div key={i} className="neu-panel-inset" style={{ padding: '0.75rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem', alignItems: 'center' }}>
-                          <strong style={{ color: 'var(--text-primary)', fontSize: '0.85rem' }}>{room.name}</strong>
-                          <span style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.85rem' }}>₹{room.costs.total.toLocaleString('en-IN')}</span>
+                      <div key={i} style={{ padding: '0.65rem', background: '#FFFFFF', border: '1px solid #E7E1D5', borderRadius: '4px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem', alignItems: 'center' }}>
+                          <strong style={{ color: '#252622', fontSize: '0.78rem', fontWeight: 600 }}>{room.name}</strong>
+                          <span style={{ color: '#252622', fontWeight: 600, fontSize: '0.78rem', fontFamily: "'JetBrains Mono', monospace" }}>₹{room.costs.total.toLocaleString('en-IN')}</span>
                         </div>
-                        <div style={{ color: 'var(--text-secondary)', lineHeight: 1.4, fontSize: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.4rem 0.8rem' }}>
+                        <div style={{ color: '#777970', lineHeight: 1.4, fontSize: '0.7rem', display: 'flex', flexWrap: 'wrap', gap: '0.35rem 0.75rem' }}>
                           <span>Area: {room.area_sqft} sqft</span>
-                          <span>RCC: ₹{room.costs.structure.toLocaleString('en-IN')}</span>
-                          <span>Tiles: ₹{room.costs.flooring.toLocaleString('en-IN')}</span>
+                          <span>Structure: ₹{room.costs.structure.toLocaleString('en-IN')}</span>
+                          <span>Flooring: ₹{room.costs.flooring.toLocaleString('en-IN')}</span>
                           <span>Paint: ₹{room.costs.painting.toLocaleString('en-IN')}</span>
-                          {room.costs.plumbing > 0 && <span>Plumb: ₹{room.costs.plumbing.toLocaleString('en-IN')}</span>}
                         </div>
                       </div>
                     ))}

@@ -1,13 +1,15 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from typing import List, Any
+from typing import List, Any, Optional
 import uuid
 import base64
 import traceback
 
 from core.auth import get_current_user
 from engines.inference import FloorPlanGenerator, fix_vastu_topology, fix_room_topology, fix_nbc_topology
+from engines.architectural_layout import build_multi_floor_layout
+from engines.intelligent_generator import IntelligentGenerationEngine, ConstraintEvaluator
 from exporters.dxf_exporter import export_to_dxf
 from exporters.floor_renderer import render_floor_plan
 from engines.vastu_engine import score_vastu
@@ -19,6 +21,31 @@ from exporters.pdf_report import generate_report_pdf
 
 router = APIRouter(tags=["engine"])
 ai_generator = FloorPlanGenerator()
+
+class FloorRoomSpec(BaseModel):
+    type: str = "room"
+    name: str = "Room"
+    min_area: Optional[float] = None
+    attached_bath: Optional[bool] = False
+
+class FloorConfigSpec(BaseModel):
+    level: int = 0
+    name: str = "Ground Floor"
+    floor_type: str = "ground"  # 'ground' | 'upper' | 'duplex_upper' | 'terrace' | 'rooftop'
+    required_rooms: List[FloorRoomSpec] = []
+    has_terrace: Optional[bool] = False
+    has_garden: Optional[bool] = False
+
+class MultiFloorGenerationRequest(BaseModel):
+    plot_width: float = Field(..., ge=15, le=500)
+    plot_length: float = Field(..., ge=15, le=500)
+    measurement_unit: str = Field("ft", pattern="^(ft|m)$")
+    entry_direction: str = Field("east")
+    budget_tier: str = Field("standard")  # 'economy' | 'standard' | 'luxury'
+    floors_count: int = Field(1, ge=1, le=4)
+    is_duplex: bool = False
+    floors: List[FloorConfigSpec] = []
+    seed: Optional[int] = None
 
 class GenerateRequest(BaseModel):
     length: float = Field(..., ge=30, le=500)
@@ -32,125 +59,75 @@ class GenerateRequest(BaseModel):
     lift: bool
     vastuToggle: bool
     entryDir: str
+    seed: Optional[int] = None
 
 @router.post("/generate")
 def generate_plans(req: GenerateRequest, current_user: dict = Depends(get_current_user)):
-    plan_id = f"plan_{uuid.uuid4().hex[:8]}"
-    plot_size = req.length * req.width
-
     try:
-        json_layout = ai_generator.generate_floorplan_json(
-            plot_size = plot_size,
-            length    = req.length,
-            width     = req.width,
-            bedrooms  = req.bedrooms,
-            bathrooms = req.bathrooms,
-            floors    = req.floors,
-            duplex    = int(req.duplex),
-            balcony   = req.balcony,
-            terrace   = int(req.terrace),
-            lift      = int(req.lift),
-            vastu     = int(req.vastuToggle),
-            entry_dir = req.entryDir,
+        spec = {
+            "plot_width": req.width,
+            "plot_length": req.length,
+            "measurement_unit": "ft",
+            "entry_direction": req.entryDir,
+            "floors_count": req.floors,
+            "bedrooms": req.bedrooms,
+            "bathrooms": req.bathrooms,
+            "is_duplex": req.duplex,
+            "balcony": req.balcony,
+            "terrace": req.terrace,
+            "lift": req.lift,
+            "vastuToggle": req.vastuToggle,
+            "budget_tier": "standard",
+            "seed": req.seed,
+        }
+        candidates = IntelligentGenerationEngine.generate_candidate_variants(
+            spec=spec,
+            candidate_count=3,
+            seed=req.seed,
         )
-    except ValueError as ve:
-        raise HTTPException(status_code=422, detail=str(ve))
+        if not candidates:
+            raise HTTPException(status_code=500, detail="Generation engine produced no viable candidates.")
+        return {
+            "status": "success",
+            "candidates": candidates,
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=f"AI inference engine failed: {str(e)}"
+            detail=f"Floor plan generation engine failed: {str(e)}"
         )
 
-    if "error" in json_layout:
-        raise HTTPException(
-            status_code=500,
-            detail="AI Layout Generation Failed. Please try again."
-        )
 
-    floor_list = json_layout.get("floors", [])
-    if not floor_list:
-        raise HTTPException(status_code=500, detail="AI returned an empty floor list")
-        
+@router.post("/generate/multi-floor")
+def generate_multi_floor_plans(req: MultiFloorGenerationRequest, current_user: dict = Depends(get_current_user)):
     try:
-        unit_label = f"{int(plot_size)} sqft · {req.bedrooms}BHK · {req.entryDir} Entry"
+        candidates = IntelligentGenerationEngine.generate_candidate_variants(
+            spec=req.model_dump(),
+            candidate_count=3,
+            seed=req.seed,
+        )
+        if not candidates:
+            raise HTTPException(status_code=500, detail="Multi-floor engine produced no viable candidates.")
 
-        # The drafter lays x over `width` and y over `length`, and emits
-        # plot_width/plot_height to match. Pass those, never the raw request
-        # fields in the other order: on a non-square plot that transposition
-        # collapses every room into one compass zone (measured: a 30x80 plot put
-        # all 8 rooms in NE), corrupting Vastu, NBC and Energy scoring alike.
-        plot_x = float(floor_list[0].get("plot_width", req.width))
-        plot_y = float(floor_list[0].get("plot_height", req.length))
-
-        for floor in floor_list:
-            floor_rooms = floor.get("rooms", [])
-            floor_label = f"{floor.get('level', 'Floor')} | {unit_label}"
-            png_bytes = render_floor_plan(floor_rooms, unit_label=floor_label, plot_w=plot_x, plot_h=plot_y, entry_dir=req.entryDir)
-            
-            b64_str = base64.b64encode(png_bytes).decode("utf-8")
-            floor["imageUrl"] = f"data:image/png;base64,{b64_str}"
-        
-        data_uri = floor_list[0]["imageUrl"]
-        
+        primary = candidates[0]
+        return {
+            "status": "success",
+            "project_id": primary["id"],
+            "floors": primary["layout"].get("floors", []),
+            "candidates": candidates,
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Render Error: {str(e)}")
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail="Floor Plan Rendering Failed due to an internal error."
+            detail=f"Multi-floor layout engine failed: {str(e)}"
         )
 
-    ground_rooms = floor_list[0].get("rooms", [])
-    vastu_rooms = list(ground_rooms)
-    if len(floor_list) > 1:
-        vastu_rooms.extend(floor_list[1].get("rooms", []))
-
-    vastu_result = score_vastu(
-        rooms    = vastu_rooms,
-        plot_w   = plot_x,
-        plot_h   = plot_y,
-        entry_dir = req.entryDir,
-    ) if req.vastuToggle else {"score": 0, "grade": "Disabled", "rules": []}
-
-    nbc_result = score_nbc(
-        rooms      = ground_rooms,
-        plot_w     = plot_x,
-        plot_h     = plot_y,
-        num_floors = req.floors,
-    )
-
-    energy_result = score_energy(
-        rooms     = ground_rooms,
-        plot_w    = plot_x,
-        plot_h    = plot_y,
-        entry_dir = req.entryDir,
-    )
-
-    sunlight_result = evaluate_sunlight(
-        layout    = json_layout,
-        entry_dir = req.entryDir,
-    )
-
-    bom_result = compute_bom(json_layout)
-
-    return {
-        "status": "success",
-        "candidates": [
-            {
-                "id":                   plan_id,
-                "imageUrl":             data_uri,
-                "layout":               json_layout,
-                "vastuScore":           vastu_result["score"],
-                "vastuResult":          vastu_result,
-                "nbcResult":            nbc_result,
-                "energyResult":         energy_result,
-                "sunlightResult":       sunlight_result,
-                "bomResult":            bom_result,
-                "validationReport":     json_layout.get("validation_report", []),
-                "circulationWarnings":  json_layout.get("circulation_warnings", []),
-            }
-        ],
-    }
 
 
 class BomRecalculateRequest(BaseModel):

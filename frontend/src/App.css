@@ -20,20 +20,27 @@ header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.875rem 1.75rem;
+  padding: 0.75rem 1.75rem;
   background: var(--nav-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--nav-border);
   position: sticky;
   top: 0;
   z-index: 100;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
 }
 
 .header-logo {
-  font-size: 1.5rem;
+  font-size: 1.35rem;
   color: var(--accent-color);
-  font-weight: 700;
-  letter-spacing: 0.1rem;
+  font-weight: 800;
+  letter-spacing: 0.12rem;
   text-transform: uppercase;
+  text-shadow: 0 0 12px rgba(0, 242, 254, 0.45);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .content-grid {
@@ -48,22 +55,30 @@ header {
 
 /* When viewing a plan, use a 3-column professional layout */
 .content-grid.active-plan-view {
-  grid-template-columns: 330px 1fr 360px;
+  grid-template-columns: 320px 1fr 350px;
 }
 
-/* ── UI Components (Linear / Rayon solid panels) ── */
+/* ── UI Components (Futuristic Glass HUD panels) ── */
 .card,
 .panel-card,
 .form-pane,
 .results-pane {
   background: var(--bg-card);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: 8px;
   padding: 1.25rem;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.card:hover,
+.panel-card:hover {
+  border-color: rgba(0, 242, 254, 0.3);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 15px rgba(0, 242, 254, 0.1);
 }
 
 /* Scrollable areas inside panels */
@@ -87,17 +102,49 @@ header {
 /* ── Buttons — unified system ── */
 button {
   font-family: var(--font-primary);
-  transition: opacity 0.2s, transform 0.2s, background 0.2s, box-shadow 0.2s;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   letter-spacing: 0.01em;
 }
 
 /* Primary button — CTAs */
 .btn-primary {
-  background: var(--accent-color);
-  color: var(--accent-fg);
-  border: 1px solid var(--accent-color);
+  background: linear-gradient(135deg, #00F2FE 0%, #0284C7 100%);
+  color: #090A0F;
+  border: 1px solid rgba(0, 242, 254, 0.4);
+  box-shadow: 0 4px 14px rgba(0, 242, 254, 0.25);
+  border-radius: 6px;
+  padding: 0.55rem 1.25rem;
+  font-weight: 700;
+  font-size: 0.875rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #38BDF8 0%, #0284C7 100%);
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 6px 20px rgba(0, 242, 254, 0.45);
+}
+
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(14, 18, 27, 0.8);
+  color: var(--text-muted);
   box-shadow: none;
-  border-radius: 2px;
+}
+
+/* Ghost button — secondary actions */
+.btn-ghost {
+  background: rgba(14, 18, 27, 0.7);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  box-shadow: none;
+  border-radius: 6px;
   padding: 0.55rem 1.25rem;
   font-weight: 600;
   font-size: 0.875rem;
@@ -105,41 +152,15 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: transparent;
-  color: var(--accent-color);
-}
-
-.btn-primary:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  border-color: #555;
-  background: #333;
-  color: #888;
-}
-
-/* Ghost button — secondary actions */
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--glass-border);
-  box-shadow: none;
-  border-radius: 2px;
-  padding: 0.55rem 1.25rem;
-  font-weight: 500;
-  font-size: 0.875rem;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .btn-ghost:hover:not(:disabled) {
-  background: var(--glass-hover);
-  color: var(--text-primary);
-  border-color: var(--text-secondary);
+  color: var(--accent-cyan);
+  background: rgba(20, 28, 42, 0.9);
+  border-color: rgba(0, 242, 254, 0.4);
+  box-shadow: 0 0 12px rgba(0, 242, 254, 0.18);
+  transform: translateY(-1px);
 }
 
 .btn-ghost:disabled {

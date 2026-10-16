@@ -57,3 +57,6 @@ _audit/
 !.env.example
 
 graphify-out/
+
+# Export outputs from scratch sessions
+scratch/exports/

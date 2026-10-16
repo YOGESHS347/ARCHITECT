@@ -1,12 +1,28 @@
-const API_BASE_URL = "http://localhost:8000";
+import { isSupabaseAuth, supabase } from './supabase';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 
-interface FurnitureItem {
+export interface LightProperties {
+  intensity: number;
+  color: string;
+  radius: number;
+  type: 'point' | 'spot';
+}
+
+export interface FurnitureItem {
+  id?: string;
+  catalogId?: string;
   name: string;
   x: number;
   y: number;
   width: number;
   height: number;
+  rotation?: number;
+  elevation?: number;
+  color?: string;
+  isLight?: boolean;
+  lightProperties?: LightProperties;
 }
 
 interface DoorSpec {
@@ -170,10 +186,64 @@ export interface FloorCirculation {
 }
 
 export interface Floor {
-  level: string;
+  level: string | number;
+  name?: string;
+  floor_type?: string;
+  floor_height?: number;
   rooms: Room[];
+  walls?: Array<{
+    room?: string;
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    orientation?: string;
+    type?: string;
+  }>;
+  doors?: Array<{
+    room?: string;
+    wall?: string;
+    position?: number;
+    width?: number;
+    type?: string;
+  }>;
+  windows?: Array<{
+    room?: string;
+    wall?: string;
+    position?: number;
+    width?: number;
+    sill_height?: number;
+  }>;
+  stairs?: { x: number; y: number; width: number; depth: number } | null;
   imageUrl?: string;
   circulation?: FloorCirculation;
+  plot_width?: number;
+  plot_height?: number;
+}
+
+export interface FloorRoomSpec {
+  type: string;
+  name: string;
+  min_area?: number;
+  attached_bath?: boolean;
+}
+
+export interface FloorConfigSpec {
+  level: number;
+  name: string;
+  floor_type: 'ground' | 'upper' | 'duplex_upper' | 'terrace' | 'rooftop';
+  required_rooms: FloorRoomSpec[];
+  has_terrace?: boolean;
+  has_garden?: boolean;
+}
+
+export interface MultiFloorGenerationRequest {
+  plot_width: number;
+  plot_length: number;
+  measurement_unit: 'ft' | 'm';
+  entry_direction: string;
+  budget_tier: 'economy' | 'standard' | 'luxury';
+  floors_count: number;
+  is_duplex: boolean;
+  floors: FloorConfigSpec[];
 }
 
 export interface LayoutUpdatePayload {
@@ -236,7 +306,7 @@ export interface ProjectMeta {
   width?: number;
 }
 
-const getAuthHeaders = () => {
+export const getAuthHeaders = () => {
   const token = localStorage.getItem("token");
   return {
     "Content-Type": "application/json",
@@ -271,6 +341,9 @@ const authFetch = async (input: RequestInfo | URL, init?: RequestInit, timeoutMs
   const res = await fetchWithTimeout(input, init, timeoutMs);
   if (res.status === 401) {
     localStorage.removeItem('token');
+    if (isSupabaseAuth() && supabase) {
+      supabase.auth.signOut().catch(() => {});
+    }
     window.location.href = '/login';
   }
   return res;
@@ -342,7 +415,16 @@ export const deleteProject = async (id: string) => {
     method: "DELETE",
     headers: getAuthHeaders(),
   });
-  if (!res.ok) throw new Error("Failed to delete project");
+  if (!res.ok) {
+    let errDetail = "Failed to delete project";
+    try {
+      const errJson = await res.json();
+      if (errJson?.detail) errDetail = errJson.detail;
+    } catch {
+      // ignore json parse failure
+    }
+    throw new Error(errDetail);
+  }
   return res.json();
 };
 
@@ -357,18 +439,43 @@ export const generatePlans = async (data: GeneratePlansPayload): Promise<{ candi
   return res.json();
 };
 
-export const exportDxf = async (rooms: Room[], planId: string, plotWidth: number, plotHeight: number): Promise<void> => {
-  const res = await authFetch(`${API_BASE_URL}/export/dxf`, {
+export const generateMultiFloorPlans = async (data: MultiFloorGenerationRequest): Promise<{
+  status: string;
+  project_id: string;
+  floors: Floor[];
+  candidates: LayoutData[];
+}> => {
+  const res = await authFetch(`${API_BASE_URL}/generate/multi-floor`, {
     method: "POST",
     headers: getAuthHeaders(),
-    body: JSON.stringify({ rooms, plan_id: planId, plot_width: plotWidth, plot_height: plotHeight }),
+    body: JSON.stringify(data),
+  }, 120_000);
+  if (!res.ok) throw new Error(`Multi-floor generation failed: ${await res.text()}`);
+  return res.json();
+};
+
+export const exportDxf = async (
+  layoutOrRooms: any,
+  planId: string,
+  plotWidth: number,
+  plotHeight: number
+): Promise<void> => {
+  const isLayout = typeof layoutOrRooms === 'object' && !Array.isArray(layoutOrRooms);
+  const payload = isLayout
+    ? { layout: layoutOrRooms, plan_id: planId, plot_width: plotWidth, plot_height: plotHeight }
+    : { rooms: layoutOrRooms, plan_id: planId, plot_width: plotWidth, plot_height: plotHeight };
+
+  const res = await authFetch(`${API_BASE_URL}/api/export/dxf`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`DXF export failed: ${await res.text()}`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `floorplan_${planId}.dxf`;
+  a.download = `cad_blueprint_${planId}.dxf`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -473,7 +580,7 @@ export const exportReport = async (
   planId: string,
   projectMeta: ProjectMeta
 ): Promise<void> => {
-  const res = await authFetch(`${API_BASE_URL}/export/pdf`, {
+  const res = await authFetch(`${API_BASE_URL}/api/export/pdf`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({
@@ -488,7 +595,7 @@ export const exportReport = async (
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
   a.href     = url;
-  a.download = `report_${planId}.pdf`;
+  a.download = `dossier_${planId}.pdf`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -510,5 +617,81 @@ export const recalculateBOM = async (
     }),
   });
   if (!res.ok) throw new Error(`BOM recalculation failed: ${await res.text()}`);
+  return res.json();
+};
+
+export interface ArchitecturalOperation {
+  action:
+    | "resize_room"
+    | "move_room"
+    | "add_room"
+    | "remove_room"
+    | "place_furniture"
+    | "remove_furniture"
+    | "swap_rooms"
+    | "change_room_type"
+    | "general_advice";
+  target_floor_level: number;
+  target_room_name?: string | null;
+  parameters: Record<string, any>;
+  explanation: string;
+}
+
+export interface AgentChatMessage {
+  id?: string;
+  conversation_id?: string;
+  sender: "user" | "agent" | "system";
+  content: string;
+  operation?: ArchitecturalOperation | null;
+  created_at?: string;
+}
+
+export interface AgentChatResponse {
+  conversation_id: string;
+  reply: string;
+  operation: ArchitecturalOperation;
+  success: boolean;
+  updated_layout?: LayoutData | null;
+  imageUrl?: string | null;
+  warnings?: string[];
+  compliance?: {
+    vastu?: VastuResult;
+    nbc?: NbcResult;
+    energy?: EnergyResult;
+    sunlight?: SunlightResult;
+    bom?: BomResult;
+  };
+}
+
+export const sendAgentChat = async (payload: {
+  project_id?: string;
+  message: string;
+  current_layout: LayoutData;
+  active_floor_level?: number;
+  plot_width?: number;
+  plot_height?: number;
+  entry_dir?: string;
+  conversation_id?: string;
+}): Promise<AgentChatResponse> => {
+  const res = await authFetch(`${API_BASE_URL}/api/agent/chat`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  }, 90_000);
+  if (!res.ok) throw new Error(`Agent request failed: ${await res.text()}`);
+  return res.json();
+};
+
+export const getAgentHistory = async (
+  projectId?: string,
+  conversationId?: string
+): Promise<{ conversation_id: string | null; messages: AgentChatMessage[] }> => {
+  const params = new URLSearchParams();
+  if (projectId) params.set("project_id", projectId);
+  if (conversationId) params.set("conversation_id", conversationId);
+  const res = await authFetch(`${API_BASE_URL}/api/agent/history?${params.toString()}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`Failed to load chat history: ${await res.text()}`);
   return res.json();
 };

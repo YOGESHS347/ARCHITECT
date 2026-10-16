@@ -20,9 +20,10 @@ interface EditorInputPanelProps {
   onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
   loading: boolean;
   onGenerate: () => void;
+  onOpenWizard?: () => void;
 }
 
-export default function EditorInputPanel({ formData, onChange, loading, onGenerate }: EditorInputPanelProps) {
+export default function EditorInputPanel({ formData, onChange, loading, onGenerate, onOpenWizard }: EditorInputPanelProps) {
   const inputStyle = {
     width: '100%',
     padding: '8px 12px',
@@ -49,6 +50,35 @@ export default function EditorInputPanel({ formData, onChange, loading, onGenera
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      {onOpenWizard && (
+        <button
+          type="button"
+          onClick={onOpenWizard}
+          style={{
+            width: '100%',
+            padding: '10px 14px',
+            borderRadius: '8px',
+            border: '1.5px solid #3B82F6',
+            background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)',
+            color: '#1D4ED8',
+            fontWeight: 800,
+            fontSize: '0.88rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            boxShadow: '0 2px 4px rgba(37,99,235,0.1)',
+            marginBottom: '0.5rem',
+            transition: 'all 0.2s ease',
+          }}
+        >
+          <span>🏛️</span>
+          <span>Multi-Floor Architecture Wizard</span>
+          <span style={{ fontSize: '0.7rem', padding: '2px 6px', background: '#2563EB', color: '#fff', borderRadius: '4px', fontWeight: 700 }}>Pro</span>
+        </button>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
         <div className="form-group">
           <label style={labelStyle}>Length (ft)</label>

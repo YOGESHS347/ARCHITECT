@@ -1,15 +1,25 @@
-import React, { useState, useRef } from 'react';
-import type { Room, FloorCirculation, SunlightResult } from '../../../shared/api-client/api';
+import React, { useState, useRef, useEffect } from 'react';
+import type { Room, FloorCirculation, SunlightResult, FurnitureItem } from '../../../shared/api-client/api';
 import CirculationOverlay from './CirculationOverlay';
 import SunlightOverlay from './SunlightOverlay';
 import { validateRoomPlacement } from '../../../shared/utils/validateRooms';
 import { toast } from 'react-hot-toast';
+import type { Command, PlacedItem } from '../geometry/types';
+import { ftToM } from '../geometry/types';
+import {
+  createUpdateFloorRoomsCommand,
+  createPlaceItemCommand,
+  createTransformItemCommand,
+  createDeleteItemCommand,
+  createUpdateItemDimensionsCommand,
+} from '../geometry/commands';
 
 interface Props {
   rooms: Room[];
   selectedRoom: Room | null;
   onRoomSelect?: (room: Room, index: number) => void;
   onRoomDrop?: (updatedRooms: Room[], imageUrl?: string) => void;
+  onGeometryCommand?: (cmd: Command) => boolean;
   circulation?: FloorCirculation | null;
   showCirculation?: boolean;
   sunlightResult?: SunlightResult | null;
@@ -18,38 +28,57 @@ interface Props {
   plotWidth?: number;
   plotHeight?: number;
   floorIndex?: number;
+  onSelectFurniture?: (item: FurnitureItem | null) => void;
+  zoom?: number;
+  onZoomChange?: (newZoom: number) => void;
+  pan?: { x: number; y: number };
+  onPanChange?: (newPan: { x: number; y: number }) => void;
+  onRegisterSvgRef?: (ref: SVGSVGElement | null) => void;
 }
 
-// Professional 2D CAD clean white color scheme per room type
+// Architectural Atelier color scheme per room type — tactile washes on warm drafting paper
 function getRoomStyle(name: string): { fill: string; stroke: string; labelColor: string; icon: string } {
   const n = name.toLowerCase();
+  const primaryInk = '#252622';
   if (n.includes('master') || (n.includes('bedroom') && n.includes('1')))
-    return { fill: '#EFF6FF', stroke: '#3B82F6', labelColor: '#1E3A8A', icon: '🛏' };
+    return { fill: 'rgba(216, 87, 64, 0.06)', stroke: primaryInk, labelColor: primaryInk, icon: '🛏' };
   if (n.includes('bedroom'))
-    return { fill: '#F0FDF4', stroke: '#22C55E', labelColor: '#14532D', icon: '🛏' };
+    return { fill: 'rgba(184, 154, 100, 0.07)', stroke: primaryInk, labelColor: primaryInk, icon: '🛏' };
   if (n.includes('bath') || n.includes('toilet') || n.includes('wc'))
-    return { fill: '#ECFEFF', stroke: '#06B6D4', labelColor: '#164E63', icon: '🚽' };
+    return { fill: 'rgba(54, 95, 168, 0.06)', stroke: primaryInk, labelColor: primaryInk, icon: '🚿' };
   if (n.includes('kitchen'))
-    return { fill: '#FEFCE8', stroke: '#EAB308', labelColor: '#713F12', icon: '🍳' };
+    return { fill: 'rgba(184, 154, 100, 0.10)', stroke: primaryInk, labelColor: primaryInk, icon: '🍳' };
   if (n.includes('living') || n.includes('lounge'))
-    return { fill: '#FAF5FF', stroke: '#A855F7', labelColor: '#581C87', icon: '🛋' };
+    return { fill: 'rgba(231, 225, 213, 0.35)', stroke: primaryInk, labelColor: primaryInk, icon: '🛋' };
   if (n.includes('dining'))
-    return { fill: '#FDF2F8', stroke: '#EC4899', labelColor: '#831843', icon: '🍽' };
+    return { fill: 'rgba(184, 154, 100, 0.08)', stroke: primaryInk, labelColor: primaryInk, icon: '🍽' };
   if (n.includes('balcony') || n.includes('terrace'))
-    return { fill: '#F0FDFA', stroke: '#14B8A6', labelColor: '#134E4A', icon: '🌿' };
+    return { fill: 'rgba(161, 174, 151, 0.16)', stroke: '#474943', labelColor: primaryInk, icon: '🌿' };
   if (n.includes('stair'))
-    return { fill: '#FFFBEB', stroke: '#F59E0B', labelColor: '#78350F', icon: '◤' };
+    return { fill: 'rgba(184, 154, 100, 0.14)', stroke: primaryInk, labelColor: primaryInk, icon: '◤' };
   if (n.includes('parking') || n.includes('garage'))
-    return { fill: '#F1F5F9', stroke: '#64748B', labelColor: '#0F172A', icon: '🚗' };
+    return { fill: 'rgba(37, 38, 34, 0.05)', stroke: primaryInk, labelColor: primaryInk, icon: '🚗' };
   if (n.includes('hall') || n.includes('lobby') || n.includes('foyer') || n.includes('entrance'))
-    return { fill: '#FFF7ED', stroke: '#F97316', labelColor: '#7C2D12', icon: '🚪' };
+    return { fill: 'rgba(231, 225, 213, 0.45)', stroke: primaryInk, labelColor: primaryInk, icon: '🚪' };
   if (n.includes('corridor'))
-    return { fill: '#F8FAFC', stroke: '#94A3B8', labelColor: '#334155', icon: '' };
+    return { fill: 'rgba(231, 225, 213, 0.25)', stroke: 'rgba(37, 38, 34, 0.4)', labelColor: '#777970', icon: '' };
   if (n.includes('store') || n.includes('utility') || n.includes('laundry'))
-    return { fill: '#F4F4F5', stroke: '#71717A', labelColor: '#27272A', icon: '📦' };
+    return { fill: 'rgba(37, 38, 34, 0.04)', stroke: primaryInk, labelColor: primaryInk, icon: '📦' };
+  if (n.includes('void'))
+    return { fill: 'rgba(255, 255, 255, 0.9)', stroke: '#365FA8', labelColor: '#365FA8', icon: '⬚' };
+  if (n.includes('pooja'))
+    return { fill: 'rgba(184, 154, 100, 0.12)', stroke: primaryInk, labelColor: primaryInk, icon: '🪔' };
+  if (n.includes('garden') || n.includes('lawn'))
+    return { fill: 'rgba(161, 174, 151, 0.22)', stroke: '#474943', labelColor: primaryInk, icon: '🌺' };
+  if (n.includes('gazebo'))
+    return { fill: 'rgba(184, 154, 100, 0.12)', stroke: primaryInk, labelColor: primaryInk, icon: '🏛️' };
+  if (n.includes('solar'))
+    return { fill: 'rgba(184, 154, 100, 0.15)', stroke: primaryInk, labelColor: primaryInk, icon: '☀️' };
+  if (n.includes('sundeck'))
+    return { fill: 'rgba(161, 174, 151, 0.18)', stroke: primaryInk, labelColor: primaryInk, icon: '⛱️' };
   if (n.includes('landing'))
-    return { fill: '#FAFAFA', stroke: '#A3A3A3', labelColor: '#404040', icon: '' };
-  return { fill: '#FFFFFF', stroke: '#CBD5E1', labelColor: '#334155', icon: '◻' };
+    return { fill: 'rgba(231, 225, 213, 0.3)', stroke: primaryInk, labelColor: primaryInk, icon: '' };
+  return { fill: 'rgba(255, 255, 255, 0.6)', stroke: primaryInk, labelColor: primaryInk, icon: '◻' };
 }
 
 // Draw a simple furniture symbol inside a room
@@ -158,79 +187,240 @@ function getFurnFill(name: string): string {
   return '#d4dce8';
 }
 
-// ── Coordinate Furniture Renderer ────────────────────────────────────────────
-// Draws detailed top-down 2D representations of furniture
-function renderDetailedFurniture(name: string, x: number, y: number, w: number, h: number, fill: string, stroke: string) {
-  const n = name.toLowerCase();
-  const isHoriz = w > h;
-  
+// ── Coordinate Furniture & Lighting CAD Renderer ─────────────────────────────
+function renderDetailedFurniture(furn: FurnitureItem, x: number, y: number, w: number, h: number, fill: string, stroke: string) {
+  const n = (furn.name || '').toLowerCase();
+  const isHoriz = w >= h;
+
+  // 1. Lighting Fixtures
+  if (furn.isLight || n.includes('light') || n.includes('sconce') || n.includes('chandelier') || n.includes('lamp') || n.includes('lantern')) {
+    const radius = furn.lightProperties?.radius || 6.0;
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    return (
+      <g>
+        {/* Dashed outer illumination radius */}
+        <circle cx={cx} cy={cy} r={radius} fill="rgba(254, 240, 138, 0.06)" stroke="#fde047" strokeWidth={0.12} strokeDasharray="0.4 0.2" />
+        {/* Luminous glow circle */}
+        <circle cx={cx} cy={cy} r={Math.max(w, h) * 0.75} fill="rgba(250, 204, 21, 0.22)" stroke="#eab308" strokeWidth={0.14} />
+        {/* Core fixture disc */}
+        <circle cx={cx} cy={cy} r={Math.max(w, h) * 0.42} fill="#fef08a" stroke="#ca8a04" strokeWidth={0.18} />
+        {/* Filament crosshair */}
+        <line x1={cx - 0.35} y1={cy} x2={cx + 0.35} y2={cy} stroke="#a16207" strokeWidth={0.1} />
+        <line x1={cx} y1={cy - 0.35} x2={cx} y2={cy + 0.35} stroke="#a16207" strokeWidth={0.1} />
+      </g>
+    );
+  }
+
+  // 2. Bed
   if (n.includes('bed')) {
-    const pW = isHoriz ? w * 0.15 : w * 0.35;
-    const pH = isHoriz ? h * 0.35 : h * 0.15;
+    const isKing = n.includes('king');
+    const pW = isHoriz ? w * 0.16 : w * 0.36;
+    const pH = isHoriz ? h * 0.36 : h * 0.16;
     return (
       <g>
-        <rect x={x} y={y} width={w} height={h} fill={fill} stroke={stroke} strokeWidth={0.12} rx={0.2} />
+        <rect x={x} y={y} width={w} height={h} fill={fill} stroke={stroke} strokeWidth={0.14} rx={0.2} />
         {isHoriz ? (
-          <line x1={x + w * 0.3} y1={y} x2={x + w * 0.3} y2={y + h} stroke={stroke} strokeWidth={0.08} />
+          <rect x={x} y={y} width={w * 0.12} height={h} fill="#475569" stroke={stroke} strokeWidth={0.1} rx={0.1} />
         ) : (
-          <line x1={x} y1={y + h * 0.3} x2={x + w} y2={y + h * 0.3} stroke={stroke} strokeWidth={0.08} />
+          <rect x={x} y={y} width={w} height={h * 0.12} fill="#475569" stroke={stroke} strokeWidth={0.1} rx={0.1} />
+        )}
+        {isHoriz ? (
+          <line x1={x + w * 0.32} y1={y} x2={x + w * 0.32} y2={y + h} stroke={stroke} strokeWidth={0.08} />
+        ) : (
+          <line x1={x} y1={y + h * 0.32} x2={x + w} y2={y + h * 0.32} stroke={stroke} strokeWidth={0.08} />
         )}
         {isHoriz ? (
           <>
-            <rect x={x + w*0.08} y={y + h*0.1} width={pW} height={pH} fill="#ffffff" stroke={stroke} strokeWidth={0.08} rx={0.1} />
-            <rect x={x + w*0.08} y={y + h*0.55} width={pW} height={pH} fill="#ffffff" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            <rect x={x + w * 0.15} y={y + h * 0.1} width={pW} height={pH} fill="#ffffff" stroke={stroke} strokeWidth={0.08} rx={0.12} />
+            <rect x={x + w * 0.15} y={y + h * 0.54} width={pW} height={pH} fill="#ffffff" stroke={stroke} strokeWidth={0.08} rx={0.12} />
           </>
         ) : (
           <>
-            <rect x={x + w*0.1} y={y + h*0.08} width={pW} height={pH} fill="#ffffff" stroke={stroke} strokeWidth={0.08} rx={0.1} />
-            <rect x={x + w*0.55} y={y + h*0.08} width={pW} height={pH} fill="#ffffff" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            <rect x={x + w * 0.1} y={y + h * 0.15} width={pW} height={pH} fill="#ffffff" stroke={stroke} strokeWidth={0.08} rx={0.12} />
+            <rect x={x + w * 0.54} y={y + h * 0.15} width={pW} height={pH} fill="#ffffff" stroke={stroke} strokeWidth={0.08} rx={0.12} />
+          </>
+        )}
+        {isKing && (
+          isHoriz ? (
+            <>
+              <rect x={x} y={y - 1.1} width={1.3} height={1.0} fill="#e2e8f0" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+              <rect x={x} y={y + h + 0.1} width={1.3} height={1.0} fill="#e2e8f0" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            </>
+          ) : (
+            <>
+              <rect x={x - 1.1} y={y} width={1.0} height={1.3} fill="#e2e8f0" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+              <rect x={x + w + 0.1} y={y} width={1.0} height={1.3} fill="#e2e8f0" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            </>
+          )
+        )}
+      </g>
+    );
+  }
+
+  // 3. Sofa & Sectional
+  if (n.includes('sofa') || n.includes('couch') || n.includes('sectional') || n.includes('l_shape') || n.includes('l-shape')) {
+    const isSectional = n.includes('sectional') || n.includes('l_shape') || n.includes('l-shape');
+    return (
+      <g>
+        <rect x={x} y={y} width={w} height={h} fill={fill} stroke={stroke} strokeWidth={0.14} rx={0.25} />
+        {isHoriz ? (
+          <>
+            <rect x={x} y={y} width={w} height={h * 0.28} fill="rgba(0,0,0,0.12)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            <rect x={x} y={y + h * 0.28} width={w * 0.14} height={h * 0.72} fill="rgba(0,0,0,0.12)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            <rect x={x + w * 0.86} y={y + h * 0.28} width={w * 0.14} height={h * 0.72} fill="rgba(0,0,0,0.12)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            {isSectional && (
+              <rect x={x + w * 0.65} y={y + h * 0.28} width={w * 0.35} height={h * 0.72} fill="rgba(0,0,0,0.06)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            )}
+          </>
+        ) : (
+          <>
+            <rect x={x + w * 0.72} y={y} width={w * 0.28} height={h} fill="rgba(0,0,0,0.12)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            <rect x={x} y={y} width={w * 0.72} height={h * 0.14} fill="rgba(0,0,0,0.12)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            <rect x={x} y={y + h * 0.86} width={w * 0.72} height={h * 0.14} fill="rgba(0,0,0,0.12)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            {isSectional && (
+              <rect x={x} y={y + h * 0.65} width={w * 0.72} height={h * 0.35} fill="rgba(0,0,0,0.06)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            )}
           </>
         )}
       </g>
     );
   }
-  
-  if (n.includes('sofa') || n.includes('couch')) {
+
+  // 4. Dining Table
+  if (n.includes('dining')) {
+    const rx = isHoriz ? w * 0.08 : h * 0.08;
     return (
       <g>
-        <rect x={x} y={y} width={w} height={h} fill={fill} stroke={stroke} strokeWidth={0.12} rx={0.2} />
         {isHoriz ? (
           <>
-            <rect x={x} y={y} width={w} height={h*0.3} fill="rgba(0,0,0,0.08)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
-            <rect x={x} y={y+h*0.3} width={w*0.15} height={h*0.7} fill="rgba(0,0,0,0.08)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
-            <rect x={x+w*0.85} y={y+h*0.3} width={w*0.15} height={h*0.7} fill="rgba(0,0,0,0.08)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            <circle cx={x + w * 0.2} cy={y - 0.4} r={0.52} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
+            <circle cx={x + w * 0.5} cy={y - 0.4} r={0.52} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
+            <circle cx={x + w * 0.8} cy={y - 0.4} r={0.52} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
+            <circle cx={x + w * 0.2} cy={y + h + 0.4} r={0.52} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
+            <circle cx={x + w * 0.5} cy={y + h + 0.4} r={0.52} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
+            <circle cx={x + w * 0.8} cy={y + h + 0.4} r={0.52} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
           </>
         ) : (
           <>
-            <rect x={x+w*0.7} y={y} width={w*0.3} height={h} fill="rgba(0,0,0,0.08)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
-            <rect x={x} y={y} width={w*0.7} height={h*0.15} fill="rgba(0,0,0,0.08)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
-            <rect x={x} y={y+h*0.85} width={w*0.7} height={h*0.15} fill="rgba(0,0,0,0.08)" stroke={stroke} strokeWidth={0.08} rx={0.1} />
+            <circle cx={x - 0.4} cy={y + h * 0.2} r={0.52} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
+            <circle cx={x - 0.4} cy={y + h * 0.5} r={0.52} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
+            <circle cx={x - 0.4} cy={y + h * 0.8} r={0.52} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
+            <circle cx={x + w + 0.4} cy={y + h * 0.2} r={0.52} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
+            <circle cx={x + w + 0.4} cy={y + h * 0.5} r={0.52} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
+            <circle cx={x + w + 0.4} cy={y + h * 0.8} r={0.52} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
           </>
         )}
+        <rect x={x} y={y} width={w} height={h} fill={fill} stroke={stroke} strokeWidth={0.14} rx={rx} />
       </g>
     );
   }
-  
-  if (n.includes('dining table')) {
-    const rx = isHoriz ? w*0.1 : h*0.1;
+
+  // 5. Toilet / Sanitary
+  if (n.includes('toilet') || n.includes('wc')) {
     return (
       <g>
-        {isHoriz ? (
-          <>
-            <circle cx={x + w*0.25} cy={y} r={h*0.18} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
-            <circle cx={x + w*0.75} cy={y} r={h*0.18} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
-            <circle cx={x + w*0.25} cy={y + h} r={h*0.18} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
-            <circle cx={x + w*0.75} cy={y + h} r={h*0.18} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
-          </>
-        ) : (
-          <>
-            <circle cx={x} cy={y + h*0.25} r={w*0.18} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
-            <circle cx={x} cy={y + h*0.75} r={w*0.18} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
-            <circle cx={x + w} cy={y + h*0.25} r={w*0.18} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
-            <circle cx={x + w} cy={y + h*0.75} r={w*0.18} fill="#ffffff" stroke={stroke} strokeWidth={0.08} />
-          </>
-        )}
-        <rect x={x} y={y} width={w} height={h} fill={fill} stroke={stroke} strokeWidth={0.12} rx={rx} />
+        <rect x={x} y={y} width={w} height={h * 0.35} fill="#f1f5f9" stroke={stroke} strokeWidth={0.1} rx={0.1} />
+        <ellipse cx={x + w / 2} cy={y + h * 0.65} rx={w * 0.42} ry={h * 0.32} fill="#ffffff" stroke={stroke} strokeWidth={0.1} />
+        <ellipse cx={x + w / 2} cy={y + h * 0.65} rx={w * 0.25} ry={h * 0.2} fill="#e0f2fe" stroke={stroke} strokeWidth={0.08} />
+      </g>
+    );
+  }
+
+  // 6. Vanity / Sink
+  if (n.includes('vanity') || n.includes('sink')) {
+    return (
+      <g>
+        <rect x={x} y={y} width={w} height={h} fill={fill} stroke={stroke} strokeWidth={0.12} rx={0.15} />
+        <ellipse cx={x + w / 2} cy={y + h / 2} rx={w * 0.32} ry={h * 0.28} fill="#ffffff" stroke={stroke} strokeWidth={0.1} />
+        <circle cx={x + w / 2} cy={y + h * 0.25} r={0.15} fill="#94a3b8" />
+      </g>
+    );
+  }
+
+  // 7. Bathtub / Shower
+  if (n.includes('bath') || n.includes('tub') || n.includes('shower')) {
+    return (
+      <g>
+        <rect x={x} y={y} width={w} height={h} fill="#e0f2fe" stroke={stroke} strokeWidth={0.14} rx={0.3} />
+        <rect x={x + 0.2} y={y + 0.2} width={w - 0.4} height={h - 0.4} fill="#ffffff" stroke={stroke} strokeWidth={0.1} rx={0.25} />
+        <circle cx={x + w * 0.2} cy={y + h / 2} r={0.18} fill="#94a3b8" />
+      </g>
+    );
+  }
+
+  // 8. Stove / Range
+  if (n.includes('cook') || n.includes('range') || n.includes('stove')) {
+    return (
+      <g>
+        <rect x={x} y={y} width={w} height={h} fill="#1e293b" stroke={stroke} strokeWidth={0.14} rx={0.15} />
+        <circle cx={x + w * 0.3} cy={y + h * 0.3} r={0.32} fill="#475569" stroke="#94a3b8" strokeWidth={0.08} />
+        <circle cx={x + w * 0.7} cy={y + h * 0.3} r={0.32} fill="#475569" stroke="#94a3b8" strokeWidth={0.08} />
+        <circle cx={x + w * 0.3} cy={y + h * 0.7} r={0.32} fill="#475569" stroke="#94a3b8" strokeWidth={0.08} />
+        <circle cx={x + w * 0.7} cy={y + h * 0.7} r={0.32} fill="#475569" stroke="#94a3b8" strokeWidth={0.08} />
+      </g>
+    );
+  }
+
+  // 9. Refrigerator
+  if (n.includes('fridge') || n.includes('refrigerator')) {
+    return (
+      <g>
+        <rect x={x} y={y} width={w} height={h} fill="#cbd5e1" stroke={stroke} strokeWidth={0.14} rx={0.15} />
+        <line x1={x} y1={y + h * 0.3} x2={x + w} y2={y + h * 0.3} stroke="#64748b" strokeWidth={0.12} />
+      </g>
+    );
+  }
+
+  // 10. Wardrobe
+  if (n.includes('wardrobe') || n.includes('closet')) {
+    return (
+      <g>
+        <rect x={x} y={y} width={w} height={h} fill={fill} stroke={stroke} strokeWidth={0.14} rx={0.15} />
+        <line x1={x + w / 2} y1={y} x2={x + w / 2} y2={y + h} stroke={stroke} strokeWidth={0.1} />
+        <circle cx={x + w / 2 - 0.25} cy={y + h / 2} r={0.1} fill="#475569" />
+        <circle cx={x + w / 2 + 0.25} cy={y + h / 2} r={0.1} fill="#475569" />
+      </g>
+    );
+  }
+
+  // 11. Desk / Study
+  if (n.includes('desk') || n.includes('study')) {
+    return (
+      <g>
+        <rect x={x} y={y} width={w} height={h} fill={fill} stroke={stroke} strokeWidth={0.14} rx={0.15} />
+        <circle cx={x + w / 2} cy={y + h + 0.45} r={0.6} fill="#ffffff" stroke={stroke} strokeWidth={0.1} />
+      </g>
+    );
+  }
+
+  // 12. Outdoor / BBQ / Planter / Lounger
+  if (n.includes('planter')) {
+    return (
+      <g>
+        <rect x={x} y={y} width={w} height={h} fill="#5c4033" stroke={stroke} strokeWidth={0.14} rx={0.15} />
+        <circle cx={x + w * 0.25} cy={y + h / 2} r={h * 0.35} fill="#22c55e" opacity={0.8} />
+        <circle cx={x + w * 0.5} cy={y + h / 2} r={h * 0.35} fill="#16a34a" opacity={0.8} />
+        <circle cx={x + w * 0.75} cy={y + h / 2} r={h * 0.35} fill="#15803d" opacity={0.8} />
+      </g>
+    );
+  }
+
+  if (n.includes('grill') || n.includes('bbq')) {
+    return (
+      <g>
+        <rect x={x} y={y} width={w} height={h} fill="#1e293b" stroke={stroke} strokeWidth={0.14} rx={0.2} />
+        <rect x={x + 0.2} y={y + 0.2} width={w - 0.4} height={h - 0.4} fill="#334155" stroke="#94a3b8" strokeWidth={0.08} />
+        <line x1={x + 0.4} y1={y + h / 2} x2={x + w - 0.4} y2={y + h / 2} stroke="#f8fafc" strokeWidth={0.12} />
+      </g>
+    );
+  }
+
+  if (n.includes('lounger') || n.includes('sunbed')) {
+    return (
+      <g>
+        <rect x={x} y={y} width={w} height={h} fill="#ffffff" stroke={stroke} strokeWidth={0.14} rx={0.2} />
+        <rect x={x + 0.15} y={y + 0.15} width={w - 0.3} height={h * 0.22} fill="#f1f5f9" stroke={stroke} strokeWidth={0.08} rx={0.1} />
       </g>
     );
   }
@@ -238,10 +428,27 @@ function renderDetailedFurniture(name: string, x: number, y: number, w: number, 
   return <rect x={x} y={y} width={w} height={h} fill={fill} stroke={stroke} strokeWidth={0.12} rx={0.15} />;
 }
 
-function FurnitureLayer({ room }: { room: Room }) {
+function FurnitureLayer({
+  room,
+  roomIndex,
+  selectedFurniture,
+  onFurniturePointerDown,
+  onRotateFurniture,
+  onDuplicateFurniture,
+  onDeleteFurniture,
+  onResizeFurnitureDown,
+}: {
+  room: Room;
+  roomIndex: number;
+  selectedFurniture: { roomIndex: number; furnitureIndex: number } | null;
+  onFurniturePointerDown: (e: React.PointerEvent, roomIndex: number, furnitureIndex: number, furn: FurnitureItem) => void;
+  onRotateFurniture: (roomIndex: number, furnitureIndex: number, deltaDeg: number) => void;
+  onDuplicateFurniture: (roomIndex: number, furnitureIndex: number) => void;
+  onDeleteFurniture: (roomIndex: number, furnitureIndex: number) => void;
+  onResizeFurnitureDown?: (e: React.PointerEvent, roomIndex: number, furnitureIndex: number, furn: FurnitureItem, corner: 'nw' | 'ne' | 'se' | 'sw') => void;
+}) {
   const items = room.furniture;
 
-  // ── Fallback: symbolic shapes for rooms with no LLM furniture data ──────────
   if (!items || items.length === 0) {
     return <FurnitureSymbol room={room} cx={room.x + room.width / 2} cy={room.y + room.height / 2} />;
   }
@@ -249,33 +456,137 @@ function FurnitureLayer({ room }: { room: Room }) {
   return (
     <g>
       {items.map((furn, idx) => {
-        // Convert room-relative coords to absolute SVG coords
         const ax = room.x + furn.x;
         const ay = room.y + furn.y;
         const fw = furn.width;
         const fh = furn.height;
         const fcx = ax + fw / 2;
         const fcy = ay + fh / 2;
-        const labelSize = Math.max(0.5, Math.min(fw, fh) * 0.15);
-        const fill = getFurnFill(furn.name);
-        const stroke = "rgba(90,110,150,0.7)";
+        const labelSize = Math.max(0.48, Math.min(fw, fh) * 0.15);
+        const fill = furn.color || getFurnFill(furn.name);
+        const stroke = "rgba(90,110,150,0.75)";
+        const isSelected = selectedFurniture?.roomIndex === roomIndex && selectedFurniture?.furnitureIndex === idx;
 
         return (
-          <g key={idx} style={{ pointerEvents: 'none' }}>
-            {renderDetailedFurniture(furn.name, ax, ay, fw, fh, fill, stroke)}
-            {/* Furniture name label */}
-            {fw > 2 && fh > 1.5 && (
-              <text
-                x={fcx} y={fcy}
-                textAnchor="middle" dominantBaseline="middle"
-                fontSize={labelSize}
-                fontFamily="Inter, system-ui, sans-serif"
-                fontWeight="500"
-                fill="rgba(40,55,90,0.85)"
-                style={{ userSelect: 'none' }}
-              >
-                {furn.name}
-              </text>
+          <g
+            key={furn.id || idx}
+            style={{ cursor: 'grab', pointerEvents: 'auto' }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              onFurniturePointerDown(e, roomIndex, idx, furn);
+            }}
+          >
+            {/* Rotated Furniture Shape */}
+            <g transform={`rotate(${furn.rotation || 0} ${fcx} ${fcy})`}>
+              {renderDetailedFurniture(furn, ax, ay, fw, fh, fill, stroke)}
+              {/* Furniture name label */}
+              {!furn.isLight && fw > 2 && fh > 1.4 && (
+                <text
+                  x={fcx} y={fcy}
+                  textAnchor="middle" dominantBaseline="middle"
+                  fontSize={labelSize}
+                  fontFamily="Inter, system-ui, sans-serif"
+                  fontWeight="600"
+                  fill="rgba(30,45,75,0.9)"
+                  style={{ userSelect: 'none', pointerEvents: 'none' }}
+                >
+                  {furn.name}
+                </text>
+              )}
+
+              {/* Selection Bounding Box & Interactive Corner Resize Handles */}
+              {isSelected && (
+                <g>
+                  <rect
+                    x={ax - 0.25}
+                    y={ay - 0.25}
+                    width={fw + 0.5}
+                    height={fh + 0.5}
+                    fill="rgba(56, 189, 248, 0.12)"
+                    stroke="#0284c7"
+                    strokeWidth={0.18}
+                    strokeDasharray="0.6 0.3"
+                    rx={0.2}
+                    style={{ pointerEvents: 'none' }}
+                  />
+                  {/* NW Resize Handle */}
+                  <g
+                    style={{ cursor: 'nwse-resize' }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      onResizeFurnitureDown?.(e, roomIndex, idx, furn, 'nw');
+                    }}
+                  >
+                    <circle cx={ax - 0.25} cy={ay - 0.25} r={0.75} fill="transparent" />
+                    <circle cx={ax - 0.25} cy={ay - 0.25} r={0.36} fill="#ffffff" stroke="#0284c7" strokeWidth={0.14} />
+                  </g>
+                  {/* NE Resize Handle */}
+                  <g
+                    style={{ cursor: 'nesw-resize' }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      onResizeFurnitureDown?.(e, roomIndex, idx, furn, 'ne');
+                    }}
+                  >
+                    <circle cx={ax + fw + 0.25} cy={ay - 0.25} r={0.75} fill="transparent" />
+                    <circle cx={ax + fw + 0.25} cy={ay - 0.25} r={0.36} fill="#ffffff" stroke="#0284c7" strokeWidth={0.14} />
+                  </g>
+                  {/* SW Resize Handle */}
+                  <g
+                    style={{ cursor: 'nesw-resize' }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      onResizeFurnitureDown?.(e, roomIndex, idx, furn, 'sw');
+                    }}
+                  >
+                    <circle cx={ax - 0.25} cy={ay + fh + 0.25} r={0.75} fill="transparent" />
+                    <circle cx={ax - 0.25} cy={ay + fh + 0.25} r={0.36} fill="#ffffff" stroke="#0284c7" strokeWidth={0.14} />
+                  </g>
+                  {/* SE Resize Handle */}
+                  <g
+                    style={{ cursor: 'nwse-resize' }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      onResizeFurnitureDown?.(e, roomIndex, idx, furn, 'se');
+                    }}
+                  >
+                    <circle cx={ax + fw + 0.25} cy={ay + fh + 0.25} r={0.75} fill="transparent" />
+                    <circle cx={ax + fw + 0.25} cy={ay + fh + 0.25} r={0.36} fill="#ffffff" stroke="#0284c7" strokeWidth={0.14} />
+                  </g>
+                </g>
+              )}
+            </g>
+
+            {/* Floating CAD Transform Action Bar above the selected item */}
+            {isSelected && (
+              <g transform={`translate(${fcx}, ${ay - 1.25})`} style={{ pointerEvents: 'auto' }}>
+                <rect x={-4.4} y={-0.8} width={8.8} height={1.6} rx={0.8} fill="#0f172a" stroke="#38bdf8" strokeWidth={0.12} />
+                {/* Rotate -45 */}
+                <g style={{ cursor: 'pointer' }} onPointerDown={(e) => { e.stopPropagation(); onRotateFurniture(roomIndex, idx, -45); }}>
+                  <rect x={-4.1} y={-0.65} width={1.4} height={1.3} rx={0.25} fill="#1e293b" />
+                  <text x={-3.4} y={0.08} textAnchor="middle" dominantBaseline="middle" fill="#38bdf8" fontSize={0.62} fontWeight="700">⟲-45°</text>
+                </g>
+                {/* Rotate +45 */}
+                <g style={{ cursor: 'pointer' }} onPointerDown={(e) => { e.stopPropagation(); onRotateFurniture(roomIndex, idx, 45); }}>
+                  <rect x={-2.45} y={-0.65} width={1.4} height={1.3} rx={0.25} fill="#1e293b" />
+                  <text x={-1.75} y={0.08} textAnchor="middle" dominantBaseline="middle" fill="#38bdf8" fontSize={0.62} fontWeight="700">⟳+45°</text>
+                </g>
+                {/* Flip 90 */}
+                <g style={{ cursor: 'pointer' }} onPointerDown={(e) => { e.stopPropagation(); onRotateFurniture(roomIndex, idx, 90); }}>
+                  <rect x={-0.8} y={-0.65} width={1.4} height={1.3} rx={0.25} fill="#1e293b" />
+                  <text x={-0.1} y={0.08} textAnchor="middle" dominantBaseline="middle" fill="#38bdf8" fontSize={0.62} fontWeight="700">↻90°</text>
+                </g>
+                {/* Clone */}
+                <g style={{ cursor: 'pointer' }} onPointerDown={(e) => { e.stopPropagation(); onDuplicateFurniture(roomIndex, idx); }}>
+                  <rect x={0.85} y={-0.65} width={1.4} height={1.3} rx={0.25} fill="#1e293b" />
+                  <text x={1.55} y={0.08} textAnchor="middle" dominantBaseline="middle" fill="#f8fafc" fontSize={0.62} fontWeight="700">⧉</text>
+                </g>
+                {/* Delete */}
+                <g style={{ cursor: 'pointer' }} onPointerDown={(e) => { e.stopPropagation(); onDeleteFurniture(roomIndex, idx); }}>
+                  <rect x={2.5} y={-0.65} width={1.4} height={1.3} rx={0.25} fill="#ef4444" />
+                  <text x={3.2} y={0.08} textAnchor="middle" dominantBaseline="middle" fill="#ffffff" fontSize={0.62} fontWeight="700">✕</text>
+                </g>
+              </g>
             )}
           </g>
         );
@@ -365,15 +676,15 @@ function DoorArcs({ room, doorAttributes }: { room: Room, doorAttributes: { clai
 
         return (
           <g key={`door-${idx}`}>
-            {/* White gap in wall = door opening */}
+            {/* Paper gap in wall = door opening */}
             <line x1={gapX1} y1={gapY1} x2={gapX2} y2={gapY2}
-              stroke="#fafbfc" strokeWidth={0.65} />
+              stroke="#FAF8F2" strokeWidth={0.65} />
             
             {!isDrawn && !isStairDoor && (
               <>
                 <path d={`M ${hx} ${hy} L ${leafX} ${leafY} A ${dw} ${dw} 0 0 ${sweepFlag} ${arcEndX} ${arcEndY}`}
-                  fill="rgba(100,116,139,0.12)" stroke="#64748b" strokeWidth={0.12} strokeDasharray="0.4 0.2" />
-                <line x1={hx} y1={hy} x2={leafX} y2={leafY} stroke="#475569" strokeWidth={0.24} />
+                  fill="rgba(37,38,34,0.04)" stroke="#777970" strokeWidth={0.12} strokeDasharray="0.4 0.2" />
+                <line x1={hx} y1={hy} x2={leafX} y2={leafY} stroke="#252622" strokeWidth={0.24} />
               </>
             )}
           </g>
@@ -429,20 +740,20 @@ function WindowMarks({ room }: { room: Room }) {
 
         return (
           <g key={`win-${room.name}-${idx}`}>
-            {/* White gap on wall (matches door gap style) */}
+            {/* Paper gap on wall (matches door gap style) */}
             <line x1={x1} y1={y1} x2={x2} y2={y2}
-              stroke="#fafbfc" strokeWidth={0.55} />
+              stroke="#FAF8F2" strokeWidth={0.55} />
             {/* Outer window line (wall face) */}
             <line x1={x1} y1={y1} x2={x2} y2={y2}
-              stroke="#60a5fa" strokeWidth={0.22} />
+              stroke="#365FA8" strokeWidth={0.22} />
             {/* Inner glass line */}
             <line x1={gx1} y1={gy1} x2={gx2} y2={gy2}
-              stroke="#60a5fa" strokeWidth={0.12} strokeDasharray="0.3 0.15" />
+              stroke="#365FA8" strokeWidth={0.12} strokeDasharray="0.3 0.15" />
             {/* End ticks */}
             <line x1={t1[0]} y1={t1[1]} x2={t1[2]} y2={t1[3]}
-              stroke="#60a5fa" strokeWidth={0.18} />
+              stroke="#365FA8" strokeWidth={0.18} />
             <line x1={t2[0]} y1={t2[1]} x2={t2[2]} y2={t2[3]}
-              stroke="#60a5fa" strokeWidth={0.18} />
+              stroke="#365FA8" strokeWidth={0.18} />
           </g>
         );
       })}
@@ -450,8 +761,26 @@ function WindowMarks({ room }: { room: Room }) {
   );
 }
 
-const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom, onRoomSelect, onRoomDrop, circulation, showCirculation, sunlightResult, showSunlight, entryDir = 'north', plotWidth, plotHeight,
+const InteractiveBlueprint: React.FC<Props> = React.memo(({
+  rooms,
+  selectedRoom,
+  onRoomSelect,
+  onRoomDrop,
+  onGeometryCommand,
+  circulation,
+  showCirculation,
+  sunlightResult,
+  showSunlight,
+  entryDir = 'north',
+  plotWidth,
+  plotHeight,
   floorIndex = 0,
+  onSelectFurniture,
+  zoom,
+  onZoomChange,
+  pan,
+  onPanChange,
+  onRegisterSvgRef,
 }) => {
   // Drag overlay: only maintain local state during an active drag.
   // When not dragging, the parent prop is the source of truth (no sync needed).
@@ -463,6 +792,62 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
   const dragOriginalRooms = useRef<Room[] | null>(null);
   const dragStartPos = useRef({ x: 0, y: 0 });
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // Expose SVG element reference for 2D floor-plan export
+  useEffect(() => {
+    onRegisterSvgRef?.(svgRef.current);
+    return () => {
+      onRegisterSvgRef?.(null);
+    };
+  }, [onRegisterSvgRef]);
+
+  // ── Zoom & Pan State ──
+  const [localZoom, setLocalZoom] = useState(1.0);
+  const [localPan, setLocalPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const panStartRef = useRef({ x: 0, y: 0, clientX: 0, clientY: 0 });
+
+  const effectiveZoom = zoom ?? localZoom;
+  const effectivePan = pan ?? localPan;
+
+  // ── Snapping & Alignment Guides ──
+  const [alignmentGuides, setAlignmentGuides] = useState<Array<{ type: 'x' | 'y'; val: number }>>([]);
+
+  // ── Selected Furniture & Dragging State ──
+  const [selectedFurniture, setSelectedFurniture] = useState<{
+    roomIndex: number;
+    furnitureIndex: number;
+  } | null>(null);
+
+  const [draggingFurniture, setDraggingFurniture] = useState<{
+    roomIndex: number;
+    furnitureIndex: number;
+    origX: number;
+    origY: number;
+    startPt: { x: number; y: number };
+  } | null>(null);
+
+  const [resizingFurniture, setResizingFurniture] = useState<{
+    roomIndex: number;
+    furnitureIndex: number;
+    corner: 'nw' | 'ne' | 'se' | 'sw';
+    origWidth: number;
+    origHeight: number;
+    origX: number;
+    origY: number;
+    startPt: { x: number; y: number };
+    furn: FurnitureItem;
+  } | null>(null);
+
+  // Sync selected furniture outwards
+  useEffect(() => {
+    if (!onSelectFurniture) return;
+    if (selectedFurniture && displayRooms[selectedFurniture.roomIndex]?.furniture?.[selectedFurniture.furnitureIndex]) {
+      onSelectFurniture(displayRooms[selectedFurniture.roomIndex].furniture![selectedFurniture.furnitureIndex]);
+    } else {
+      onSelectFurniture(null);
+    }
+  }, [selectedFurniture, displayRooms, onSelectFurniture]);
 
   // Global map to deduplicate door swing drawing across adjacent rooms purely (Strict Mode safe)
   const doorAttributes = React.useMemo(() => {
@@ -513,7 +898,318 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
     dragStartPos.current = getSvgCoordinates(e.clientX, e.clientY);
   };
 
+  // ── Furniture Handlers ──
+  const handleFurniturePointerDown = (e: React.PointerEvent, roomIndex: number, furnitureIndex: number, furn: FurnitureItem) => {
+    setDraggingFurniture({
+      roomIndex,
+      furnitureIndex,
+      origX: furn.x,
+      origY: furn.y,
+      startPt: getSvgCoordinates(e.clientX, e.clientY),
+    });
+    setDragRooms(rooms);
+    dragOriginalRooms.current = JSON.parse(JSON.stringify(rooms));
+    setSelectedFurniture({ roomIndex, furnitureIndex });
+    (e.target as Element).setPointerCapture(e.pointerId);
+  };
+
+  const handleFurnitureResizeDown = (
+    e: React.PointerEvent,
+    roomIndex: number,
+    furnitureIndex: number,
+    furn: FurnitureItem,
+    corner: 'nw' | 'ne' | 'se' | 'sw'
+  ) => {
+    setResizingFurniture({
+      roomIndex,
+      furnitureIndex,
+      corner,
+      origWidth: furn.width,
+      origHeight: furn.height,
+      origX: furn.x,
+      origY: furn.y,
+      startPt: getSvgCoordinates(e.clientX, e.clientY),
+      furn,
+    });
+    setDragRooms(rooms);
+    dragOriginalRooms.current = JSON.parse(JSON.stringify(rooms));
+    setSelectedFurniture({ roomIndex, furnitureIndex });
+    (e.target as Element).setPointerCapture(e.pointerId);
+  };
+
+  const handleRotateFurniture = (roomIndex: number, furnitureIndex: number, deltaDeg: number) => {
+    const newRooms = JSON.parse(JSON.stringify(rooms)) as Room[];
+    const room = newRooms[roomIndex];
+    if (room?.furniture?.[furnitureIndex]) {
+      const furn = room.furniture[furnitureIndex];
+      const curRot = furn.rotation || 0;
+      const newRot = (curRot + deltaDeg + 360) % 360;
+      furn.rotation = newRot;
+      if (onGeometryCommand) {
+        const itemXM = ftToM(room.x + furn.x);
+        const itemYM = ftToM(room.y + furn.y);
+        const cmd = createTransformItemCommand(floorIndex, furn.id || '', itemXM, itemYM, newRot);
+        onGeometryCommand(cmd);
+      } else if (onRoomDrop) {
+        onRoomDrop(newRooms);
+      }
+    }
+  };
+
+  const handleDuplicateFurniture = (roomIndex: number, furnitureIndex: number) => {
+    const newRooms = JSON.parse(JSON.stringify(rooms)) as Room[];
+    const room = newRooms[roomIndex];
+    if (room?.furniture?.[furnitureIndex]) {
+      const orig = room.furniture[furnitureIndex];
+      const cloneId = `furn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const newX = Math.max(0, Math.min(room.width - orig.width, orig.x + 1.0));
+      const newY = Math.max(0, Math.min(room.height - orig.height, orig.y + 1.0));
+
+      if (onGeometryCommand) {
+        const itemXM = ftToM(room.x + newX);
+        const itemYM = ftToM(room.y + newY);
+        const placedItem: PlacedItem = {
+          id: cloneId,
+          assetId: orig.catalogId || orig.name.toLowerCase().replace(/\s+/g, '_'),
+          name: orig.name,
+          x: itemXM,
+          y: itemYM,
+          elevation: ftToM(orig.elevation || 0),
+          rotation: orig.rotation || 0,
+          width: ftToM(orig.width),
+          depth: ftToM(orig.height),
+          height: ftToM(2.5),
+          color: orig.color,
+          isLight: orig.isLight,
+          properties: {
+            roomId: room.name,
+            lightProperties: orig.lightProperties,
+          },
+        };
+        const cmd = createPlaceItemCommand(floorIndex, placedItem);
+        onGeometryCommand(cmd);
+      } else {
+        const clone: FurnitureItem = {
+          ...orig,
+          id: cloneId,
+          x: newX,
+          y: newY,
+        };
+        room.furniture.push(clone);
+        if (onRoomDrop) {
+          onRoomDrop(newRooms);
+        }
+      }
+      setSelectedFurniture({ roomIndex, furnitureIndex: (room.furniture?.length || 1) - 1 });
+      toast.success(`Duplicated ${orig.name}`);
+    }
+  };
+
+  const handleDeleteFurniture = (roomIndex: number, furnitureIndex: number) => {
+    const newRooms = JSON.parse(JSON.stringify(rooms)) as Room[];
+    const room = newRooms[roomIndex];
+    if (room?.furniture?.[furnitureIndex]) {
+      const removed = room.furniture[furnitureIndex];
+      if (onGeometryCommand) {
+        const cmd = createDeleteItemCommand(floorIndex, removed.id || '');
+        onGeometryCommand(cmd);
+      } else {
+        room.furniture.splice(furnitureIndex, 1);
+        if (onRoomDrop) {
+          onRoomDrop(newRooms);
+        }
+      }
+      setSelectedFurniture(null);
+      toast.success(`Removed ${removed.name}`);
+    }
+  };
+
+  // Keyboard shortcut listener for selected furniture (Delete / Backspace / R)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!selectedFurniture) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        handleDeleteFurniture(selectedFurniture.roomIndex, selectedFurniture.furnitureIndex);
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        handleRotateFurniture(selectedFurniture.roomIndex, selectedFurniture.furnitureIndex, 45);
+      } else if (e.key === 'Escape') {
+        setSelectedFurniture(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedFurniture, rooms]);
+
+  // Drop handler for items dragged from the Furniture Catalog Drawer
+  const handleDropFromCatalog = (e: React.DragEvent) => {
+    e.preventDefault();
+    try {
+      const rawData = e.dataTransfer.getData('application/json');
+      if (!rawData) return;
+      const catItem = JSON.parse(rawData);
+      if (!catItem || !catItem.name) return;
+
+      const pt = getSvgCoordinates(e.clientX, e.clientY);
+      let targetRoomIdx = displayRooms.findIndex(r =>
+        pt.x >= r.x && pt.x <= r.x + r.width &&
+        pt.y >= r.y && pt.y <= r.y + r.height
+      );
+
+      if (targetRoomIdx === -1 && selectedRoom) {
+        targetRoomIdx = displayRooms.findIndex(r => r.name === selectedRoom.name);
+      }
+      if (targetRoomIdx === -1) {
+        targetRoomIdx = 0;
+      }
+
+      const room = displayRooms[targetRoomIdx];
+      if (!room) return;
+
+      const fw = catItem.dimensions?.widthFt ?? catItem.dimensions?.width ?? 3;
+      const fh = catItem.dimensions?.depthFt ?? catItem.dimensions?.depth ?? 3;
+
+      const rawRelX = pt.x - room.x - fw / 2;
+      const rawRelY = pt.y - room.y - fh / 2;
+      const relX = Math.max(0, Math.min(Math.max(0, room.width - fw), Math.round(rawRelX * 2) / 2));
+      const relY = Math.max(0, Math.min(Math.max(0, room.height - fh), Math.round(rawRelY * 2) / 2));
+
+      const itemId = `furn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const itemXM = ftToM(room.x + relX);
+      const itemYM = ftToM(room.y + relY);
+
+      if (onGeometryCommand) {
+        const placedItem: PlacedItem = {
+          id: itemId,
+          assetId: catItem.id,
+          name: catItem.name,
+          x: itemXM,
+          y: itemYM,
+          elevation: ftToM(catItem.defaultElevationFt ?? catItem.elevation ?? 0),
+          rotation: catItem.defaultRotation ?? 0,
+          width: ftToM(fw),
+          depth: ftToM(fh),
+          height: ftToM(catItem.dimensions?.heightFt ?? catItem.dimensions?.height ?? 2.5),
+          color: catItem.defaultColor,
+          isLight: catItem.category === 'Lighting Fixtures' || Boolean(catItem.isLight),
+          properties: {
+            category: catItem.category,
+            roomId: room.name,
+            lightProperties: catItem.lightProperties,
+          },
+        };
+        const cmd = createPlaceItemCommand(floorIndex, placedItem);
+        onGeometryCommand(cmd);
+      } else {
+        const newFurn: FurnitureItem = {
+          id: itemId,
+          catalogId: catItem.id,
+          name: catItem.name,
+          x: relX,
+          y: relY,
+          width: fw,
+          height: fh,
+          rotation: 0,
+          elevation: catItem.defaultElevationFt ?? catItem.elevation ?? 0,
+          color: catItem.defaultColor,
+          isLight: catItem.category === 'Lighting Fixtures' || Boolean(catItem.isLight),
+          lightProperties: catItem.lightProperties,
+        };
+
+        const newRooms = JSON.parse(JSON.stringify(displayRooms)) as Room[];
+        if (!newRooms[targetRoomIdx].furniture) {
+          newRooms[targetRoomIdx].furniture = [];
+        }
+        newRooms[targetRoomIdx].furniture!.push(newFurn);
+
+        if (onRoomDrop) {
+          onRoomDrop(newRooms);
+        }
+      }
+      setSelectedFurniture({ roomIndex: targetRoomIdx, furnitureIndex: (room.furniture?.length || 1) - 1 });
+      toast.success(`Placed ${catItem.name} in ${room.name}`);
+    } catch (err) {
+      console.error('Error handling catalog drop:', err);
+    }
+  };
+
   const handlePointerMove = (e: React.PointerEvent) => {
+    // 0. Check Furniture Resizing
+    if (resizingFurniture !== null) {
+      const currentPos = getSvgCoordinates(e.clientX, e.clientY);
+      const totalDx = currentPos.x - resizingFurniture.startPt.x;
+      const totalDy = currentPos.y - resizingFurniture.startPt.y;
+
+      // Project onto rotated furniture local coordinate system
+      const rotRad = ((resizingFurniture.furn.rotation || 0) * Math.PI) / 180;
+      const cos = Math.cos(rotRad);
+      const sin = Math.sin(rotRad);
+      const dxLocal = totalDx * cos + totalDy * sin;
+      const dyLocal = -totalDx * sin + totalDy * cos;
+
+      let newW = resizingFurniture.origWidth;
+      let newH = resizingFurniture.origHeight;
+      const MIN_DIM = 0.5;
+
+      if (resizingFurniture.corner === 'se') {
+        newW = Math.max(MIN_DIM, Math.round((resizingFurniture.origWidth + dxLocal) * 2) / 2);
+        newH = Math.max(MIN_DIM, Math.round((resizingFurniture.origHeight + dyLocal) * 2) / 2);
+      } else if (resizingFurniture.corner === 'sw') {
+        newW = Math.max(MIN_DIM, Math.round((resizingFurniture.origWidth - dxLocal) * 2) / 2);
+        newH = Math.max(MIN_DIM, Math.round((resizingFurniture.origHeight + dyLocal) * 2) / 2);
+      } else if (resizingFurniture.corner === 'ne') {
+        newW = Math.max(MIN_DIM, Math.round((resizingFurniture.origWidth + dxLocal) * 2) / 2);
+        newH = Math.max(MIN_DIM, Math.round((resizingFurniture.origHeight - dyLocal) * 2) / 2);
+      } else if (resizingFurniture.corner === 'nw') {
+        newW = Math.max(MIN_DIM, Math.round((resizingFurniture.origWidth - dxLocal) * 2) / 2);
+        newH = Math.max(MIN_DIM, Math.round((resizingFurniture.origHeight - dyLocal) * 2) / 2);
+      }
+
+      const newRooms = JSON.parse(JSON.stringify(dragOriginalRooms.current || rooms)) as Room[];
+      const room = newRooms[resizingFurniture.roomIndex];
+      if (room && room.furniture && room.furniture[resizingFurniture.furnitureIndex]) {
+        const item = room.furniture[resizingFurniture.furnitureIndex];
+        item.width = newW;
+        item.height = newH;
+        setDragRooms(newRooms);
+      }
+      return;
+    }
+
+    // 1. Check Furniture Dragging
+    if (draggingFurniture !== null) {
+      const currentPos = getSvgCoordinates(e.clientX, e.clientY);
+      const totalDx = currentPos.x - draggingFurniture.startPt.x;
+      const totalDy = currentPos.y - draggingFurniture.startPt.y;
+
+      const dx = Math.round(totalDx * 2) / 2;
+      const dy = Math.round(totalDy * 2) / 2;
+
+      const newRooms = JSON.parse(JSON.stringify(dragOriginalRooms.current || rooms)) as Room[];
+      const room = newRooms[draggingFurniture.roomIndex];
+      if (room && room.furniture && room.furniture[draggingFurniture.furnitureIndex]) {
+        const furn = room.furniture[draggingFurniture.furnitureIndex];
+        const newX = Math.max(0, Math.min(Math.max(0, room.width - furn.width), draggingFurniture.origX + dx));
+        const newY = Math.max(0, Math.min(Math.max(0, room.height - furn.height), draggingFurniture.origY + dy));
+        furn.x = Math.round(newX * 2) / 2;
+        furn.y = Math.round(newY * 2) / 2;
+        setDragRooms(newRooms);
+      }
+      return;
+    }
+
+    // 0. Check Canvas Panning
+    if (isPanning) {
+      const dx = (e.clientX - panStartRef.current.clientX) / (effectiveZoom * 18);
+      const dy = (e.clientY - panStartRef.current.clientY) / (effectiveZoom * 18);
+      const newPan = { x: panStartRef.current.x + dx, y: panStartRef.current.y + dy };
+      if (onPanChange) onPanChange(newPan);
+      else setLocalPan(newPan);
+      return;
+    }
+
+    // 2. Check Room Wall / Vertex Dragging
     if (draggingRoomIndex === null || !dragOriginalRooms.current) return;
     const currentPos = getSvgCoordinates(e.clientX, e.clientY);
     
@@ -561,6 +1257,40 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
         newSharedY = targetRoom.y;
       }
 
+      // Snapping & Alignment Guides Calculation
+      const ALIGN_TOL = 0.6;
+      const newGuides: Array<{ type: 'x' | 'y'; val: number }> = [];
+
+      if (newSharedX !== null) {
+        for (let j = 0; j < newRooms.length; j++) {
+          if (j === draggingRoomIndex) continue;
+          const other = newRooms[j];
+          if (Math.abs(newSharedX - other.x) <= ALIGN_TOL) {
+            newSharedX = other.x;
+            newGuides.push({ type: 'x', val: other.x });
+          } else if (Math.abs(newSharedX - (other.x + other.width)) <= ALIGN_TOL) {
+            newSharedX = other.x + other.width;
+            newGuides.push({ type: 'x', val: other.x + other.width });
+          }
+        }
+      }
+
+      if (newSharedY !== null) {
+        for (let j = 0; j < newRooms.length; j++) {
+          if (j === draggingRoomIndex) continue;
+          const other = newRooms[j];
+          if (Math.abs(newSharedY - other.y) <= ALIGN_TOL) {
+            newSharedY = other.y;
+            newGuides.push({ type: 'y', val: other.y });
+          } else if (Math.abs(newSharedY - (other.y + other.height)) <= ALIGN_TOL) {
+            newSharedY = other.y + other.height;
+            newGuides.push({ type: 'y', val: other.y + other.height });
+          }
+        }
+      }
+
+      setAlignmentGuides(newGuides);
+
       // Move ALL rooms that shared the original wall axis
       for (let i = 0; i < newRooms.length; i++) {
         if (i === draggingRoomIndex) continue;
@@ -604,24 +1334,102 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    setAlignmentGuides([]);
+
+    if (isPanning) {
+      setIsPanning(false);
+      (e.target as Element).releasePointerCapture(e.pointerId);
+      return;
+    }
+
+    if (resizingFurniture !== null) {
+      (e.target as Element).releasePointerCapture(e.pointerId);
+      const { roomIndex, furnitureIndex, furn } = resizingFurniture;
+      setResizingFurniture(null);
+      if (dragRooms) {
+        const room = dragRooms[roomIndex];
+        const updatedFurn = room?.furniture?.[furnitureIndex];
+        if (updatedFurn && onGeometryCommand) {
+          const cmd = createUpdateItemDimensionsCommand(
+            floorIndex,
+            furn.id || '',
+            ftToM(updatedFurn.width),
+            ftToM(updatedFurn.height),
+            ftToM(furn.elevation ?? 2.5)
+          );
+          onGeometryCommand(cmd);
+        } else if (onRoomDrop) {
+          onRoomDrop(dragRooms);
+        }
+      }
+      setDragRooms(null);
+      dragOriginalRooms.current = null;
+      return;
+    }
+
+    if (draggingFurniture !== null) {
+      (e.target as Element).releasePointerCapture(e.pointerId);
+      const { roomIndex, furnitureIndex } = draggingFurniture;
+      setDraggingFurniture(null);
+      if (dragRooms) {
+        const room = dragRooms[roomIndex];
+        const furn = room?.furniture?.[furnitureIndex];
+        const origX = draggingFurniture.origX;
+        const origY = draggingFurniture.origY;
+        const hasMoved = furn && (Math.abs(furn.x - origX) > 0.05 || Math.abs(furn.y - origY) > 0.05);
+        if (furn && hasMoved && onGeometryCommand) {
+          const itemXM = ftToM(room.x + furn.x);
+          const itemYM = ftToM(room.y + furn.y);
+          const cmd = createTransformItemCommand(floorIndex, furn.id || '', itemXM, itemYM, furn.rotation || 0);
+          onGeometryCommand(cmd);
+        } else if (furn && hasMoved && onRoomDrop) {
+          onRoomDrop(dragRooms);
+        }
+      }
+      setDragRooms(null);
+      dragOriginalRooms.current = null;
+      return;
+    }
+
     if (draggingRoomIndex !== null) {
+      const edge = draggingEdge;
       setDraggingRoomIndex(null);
       setDraggingEdge(null);
       (e.target as Element).releasePointerCapture(e.pointerId);
       
-      if (dragRooms && plotWidth && plotHeight) {
-        const violations = validateRoomPlacement(dragRooms, plotWidth, plotHeight);
-        if (violations.length > 0) {
-          toast.error(violations[0].reason);
-          setDragRooms(null); // revert to original rooms
-          return;
+      const hasChanged = edge !== null && Boolean(dragRooms && dragOriginalRooms.current &&
+        JSON.stringify(dragRooms) !== JSON.stringify(dragOriginalRooms.current));
+
+      if (hasChanged && dragRooms) {
+        // Enforce geometry validation through canonical CommandEngine
+        if (onGeometryCommand) {
+          const roomName = dragOriginalRooms.current?.[draggingRoomIndex]?.name || 'Room';
+          const cmd = createUpdateFloorRoomsCommand(
+            floorIndex,
+            dragRooms,
+            `Resize ${roomName} Boundary`
+          );
+          const ok = onGeometryCommand(cmd);
+          if (!ok) {
+            setDragRooms(null); // Revert candidate overlay to keep document pristine
+            return;
+          }
+        } else if (plotWidth && plotHeight) {
+          const violations = validateRoomPlacement(dragRooms, plotWidth, plotHeight);
+          if (violations.length > 0) {
+            toast.error(violations[0].reason);
+            setDragRooms(null); // revert to original rooms
+            return;
+          }
+          if (onRoomDrop) {
+            onRoomDrop(dragRooms);
+          }
+        } else if (onRoomDrop) {
+          onRoomDrop(dragRooms);
         }
       }
-
-      if (onRoomDrop && dragRooms) {
-        onRoomDrop(dragRooms);
-      }
-      setDragRooms(null); // clear overlay — parent now owns the state
+      setDragRooms(null);
+      dragOriginalRooms.current = null;
     }
   };
 
@@ -642,9 +1450,14 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
   const minY = Math.min(...allY) - PAD;
   const maxX = Math.max(...allX) + PAD;
   const maxY = Math.max(...allY) + PAD;
-  const vbW = maxX - minX;
-  const vbH = maxY - minY;
-  const viewBox = `${minX} ${minY} ${vbW} ${vbH}`;
+  
+  const baseW = maxX - minX;
+  const baseH = maxY - minY;
+  const vbW = baseW / effectiveZoom;
+  const vbH = baseH / effectiveZoom;
+  const vbX = minX + (baseW - vbW) / 2 - effectivePan.x;
+  const vbY = minY + (baseH - vbH) / 2 - effectivePan.y;
+  const viewBox = `${vbX} ${vbY} ${vbW} ${vbH}`;
 
   const scaleLen = 10;
   const sbX = minX + PAD * 0.6;
@@ -657,44 +1470,98 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
       width="100%"
       height="100%"
       xmlns="http://www.w3.org/2000/svg"
-      style={{ display: 'block', background: 'var(--input-bg, #FFFFFF)' }}
+      style={{
+        display: 'block',
+        background: 'var(--paper-sheet, #FAF8F2)',
+        cursor: isPanning ? 'grabbing' : 'default',
+        userSelect: 'none',
+      }}
+      onWheel={(e) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.15 : 0.85;
+        const nextZoom = Math.max(0.4, Math.min(3.5, +(effectiveZoom * factor).toFixed(2)));
+        if (onZoomChange) onZoomChange(nextZoom);
+        else setLocalZoom(nextZoom);
+      }}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerDown={(e) => {
+        if (e.button === 1 || e.target === svgRef.current) {
+          setIsPanning(true);
+          panStartRef.current = { x: effectivePan.x, y: effectivePan.y, clientX: e.clientX, clientY: e.clientY };
+          (e.target as Element).setPointerCapture(e.pointerId);
+          setSelectedFurniture(null);
+        }
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDrop={handleDropFromCatalog}
     >
       <defs>
-        {/* Fine blueprint grid */}
+        {/* Architectural drafting paper millimeter grid */}
         <pattern id="finegrid" width="1" height="1" patternUnits="userSpaceOnUse">
-          <path d="M 1 0 L 0 0 0 1" fill="none" stroke="#F1F5F9" strokeWidth="0.04" />
+          <path d="M 1 0 L 0 0 0 1" fill="none" stroke="rgba(37, 38, 34, 0.05)" strokeWidth="0.03" />
         </pattern>
         <pattern id="coarsegrid" width="5" height="5" patternUnits="userSpaceOnUse">
           <rect width="5" height="5" fill="url(#finegrid)" />
-          <path d="M 5 0 L 0 0 0 5" fill="none" stroke="#E2E8F0" strokeWidth="0.1" />
+          <path d="M 5 0 L 0 0 0 5" fill="none" stroke="rgba(37, 38, 34, 0.10)" strokeWidth="0.06" />
         </pattern>
-        {/* Wall hatch pattern */}
+        {/* Wall hatch pattern — masonry cut line */}
         <pattern id="hatch" width="1" height="1" patternUnits="userSpaceOnUse">
-          <path d="M-0.5,0.5 l1,-1 M0,1 l1,-1 M0.5,1.5 l1,-1" stroke="#CBD5E1" strokeWidth="0.15" />
+          <path d="M-0.5,0.5 l1,-1 M0,1 l1,-1 M0.5,1.5 l1,-1" stroke="rgba(37, 38, 34, 0.12)" strokeWidth="0.08" />
         </pattern>
         
-        {/* Dropshadow for 3D effect */}
+        {/* Subtle architectural tactile drop shadow */}
         <filter id="dropshadow" x="-10%" y="-10%" width="120%" height="120%">
-          <feDropShadow dx="0.2" dy="0.3" stdDeviation="0.4" floodColor="#0F172A" floodOpacity="0.15" />
+          <feDropShadow dx="0.15" dy="0.2" stdDeviation="0.3" floodColor="#252622" floodOpacity="0.08" />
         </filter>
       </defs>
 
       {/* Grid background */}
-      <rect x={minX} y={minY} width={vbW} height={vbH} fill="url(#coarsegrid)" opacity={0.7} />
+      <rect x={minX - 50} y={minY - 50} width={vbW + 100} height={vbH + 100} fill="url(#coarsegrid)" opacity={0.9} />
 
-      {/* Title block */}
-      <text x={minX + PAD * 0.5} y={minY + PAD * 0.35}
-        fontSize={1.2} fontFamily="Inter, sans-serif" fontWeight="700"
-        fill="#E0E0E0" letterSpacing="0.05">
-        FLOOR PLAN
-      </text>
-      <text x={minX + PAD * 0.5} y={minY + PAD * 0.65}
-        fontSize={0.75} fontFamily="Inter, sans-serif"
-        fill="#A0A0A0">
-        Interactive Blueprint • {displayRooms.length} Rooms
-      </text>
+      {/* Dynamic CAD Alignment Guide Lines */}
+      {alignmentGuides.map((g, idx) => (
+        <g key={`guide-${idx}`} style={{ pointerEvents: 'none' }}>
+          {g.type === 'x' ? (
+            <>
+              <line
+                x1={g.val} y1={minY - 50}
+                x2={g.val} y2={maxY + 50}
+                stroke="#365FA8" strokeWidth={0.14} strokeDasharray="0.8 0.4" opacity={0.85}
+              />
+              <circle cx={g.val} cy={minY - 1} r={0.3} fill="#365FA8" />
+              <circle cx={g.val} cy={maxY + 1} r={0.3} fill="#365FA8" />
+            </>
+          ) : (
+            <>
+              <line
+                x1={minX - 50} y1={g.val}
+                x2={maxX + 50} y2={g.val}
+                stroke="#365FA8" strokeWidth={0.14} strokeDasharray="0.8 0.4" opacity={0.85}
+              />
+              <circle cx={minX - 1} cy={g.val} r={0.3} fill="#365FA8" />
+              <circle cx={maxX + 1} cy={g.val} r={0.3} fill="#365FA8" />
+            </>
+          )}
+        </g>
+      ))}
+
+      {/* Telemetry Title Block — Refined Architectural Atelier Sheet */}
+      <g>
+        <text x={minX + PAD * 0.5} y={minY + PAD * 0.35}
+          fontSize={1.1} fontFamily="'Newsreader', Georgia, serif" fontWeight="600"
+          fill="#252622" letterSpacing="0.02">
+          DRAWING // LEVEL 0{(floorIndex ?? 0) + 1}
+        </text>
+        <text x={minX + PAD * 0.5} y={minY + PAD * 0.62}
+          fontSize={0.62} fontFamily="'JetBrains Mono', monospace"
+          fill="#777970" letterSpacing="0.04">
+          ARCHITECTURAL BLUEPRINT • {displayRooms.length} REGISTERED ZONES • {Math.round(maxX - minX - PAD * 2)}×{Math.round(maxY - minY - PAD * 2)} FT
+        </text>
+      </g>
 
       {/* Outer building boundary */}
       {(() => {
@@ -712,9 +1579,11 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
             y={Math.min(...boundsRooms.map(r => r.y)) - WALL}
             width={Math.max(...boundsRooms.map(r => r.x + r.width)) - Math.min(...boundsRooms.map(r => r.x)) + WALL * 2}
             height={Math.max(...boundsRooms.map(r => r.y + r.height)) - Math.min(...boundsRooms.map(r => r.y)) + WALL * 2}
-          fill="url(#hatch)"
-          stroke="#1e293b"
-          strokeWidth={WALL * 1.5}
+            fill="url(#hatch)"
+            stroke="#252622"
+            strokeOpacity="0.85"
+            strokeWidth={WALL * 1.5}
+            rx={0.1}
           />
         );
       })()}
@@ -722,17 +1591,19 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
       {/* Rooms */}
       {displayRooms.map((room, i) => {
         const style = getRoomStyle(room.name);
-        const { fill, labelColor } = style;
+        const { fill } = style;
 
         const isSelected = selectedRoom?.name === room.name;
         const cx = room.x + room.width / 2;
         const cy = room.y + room.height / 2;
-        const labelSize = Math.max(0.75, Math.min(room.width, room.height) * 0.12, 1);
-        const subSize = labelSize * 0.68;
+        const labelSize = Math.max(0.68, Math.min(room.width * 0.12, room.height * 0.16, 1.1));
+        const subSize = labelSize * 0.65;
         const sqft = Math.round(room.width * room.height);
 
-        const isBalcony = room.name.toLowerCase().includes('balcony') || 
-                          room.name.toLowerCase().includes('terrace');
+        const lowerName = room.name.toLowerCase();
+        const isBalcony = lowerName.includes('balcony') || lowerName.includes('terrace');
+        const isStairs = lowerName.includes('stair') || lowerName.includes('staircase');
+        const isVoid = lowerName.includes('void') || lowerName.includes('double height') || lowerName.includes('duplex');
 
         if (isBalcony) {
           return (
@@ -745,29 +1616,29 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
               }}
               style={{ cursor: draggingRoomIndex === i ? 'grabbing' : 'grab', touchAction: 'none' }}>
               
-              {/* Light open-air fill */}
+              {/* Light open-air sage wash */}
               <rect x={room.x} y={room.y} width={room.width} height={room.height}
-                    fill="rgba(147, 197, 253, 0.15)" stroke="none" />
-              {/* Inner wall — solid (shared with room above) */}
+                    fill="rgba(161, 174, 151, 0.14)" stroke="none" />
+              {/* Inner wall — solid ink */}
               <line x1={room.x} y1={room.y} x2={room.x + room.width} y2={room.y}
-                    stroke="#1e293b" strokeWidth={WALL * 0.8} />
-              {/* Outer boundary — thin dashed line indicating open edge */}
+                    stroke="#252622" strokeWidth={WALL * 0.8} />
+              {/* Outer boundary — thin dashed line indicating parapet / railing */}
               <rect x={room.x} y={room.y} width={room.width} height={room.height}
-                    stroke="#64748b" strokeWidth={WALL * 0.2} strokeDasharray="4 4" fill="none" />
+                    stroke="#474943" strokeWidth={WALL * 0.35} strokeDasharray="1 0.8" fill="none" />
               
-              {/* Railing pattern — diagonal hatch lines inside */}
+              {/* Railing pattern — restrained diagonal hatch lines */}
               <line x1={room.x} y1={room.y} x2={room.x + room.width} y2={room.y + room.height}
-                    stroke="rgba(147,197,253,0.3)" strokeWidth={0.15} />
+                    stroke="rgba(37, 38, 34, 0.08)" strokeWidth={0.08} />
               <line x1={room.x + room.width} y1={room.y} x2={room.x} y2={room.y + room.height}
-                    stroke="rgba(147,197,253,0.3)" strokeWidth={0.15} />
+                    stroke="rgba(37, 38, 34, 0.08)" strokeWidth={0.08} />
 
               <text x={cx} y={cy - subSize * 0.5} textAnchor="middle" dominantBaseline="middle"
-                    fill="#1d4ed8" fontSize={labelSize} fontWeight="700"
-                    fontFamily="Inter, system-ui, sans-serif" style={{ pointerEvents: 'none', userSelect: 'none' }}>
-                🌿 {room.name}
+                    fill="#252622" fontSize={labelSize} fontWeight="600"
+                    fontFamily="'Plus Jakarta Sans', system-ui, sans-serif" style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                {room.name}
               </text>
               <text x={cx} y={cy + labelSize * 0.5} textAnchor="middle" dominantBaseline="middle"
-                    fill="#3b82f6" fontSize={subSize} fontFamily="Inter, system-ui, sans-serif" opacity={0.8}
+                    fill="#777970" fontSize={subSize} fontFamily="'JetBrains Mono', monospace"
                     style={{ pointerEvents: 'none', userSelect: 'none' }}>
                 {Math.round(room.width)}×{Math.round(room.height)} ft · {sqft} sqft
               </text>
@@ -780,6 +1651,7 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
             className={`room-group ${isSelected ? 'selected' : ''}`}
             onPointerDown={(e) => {
               e.stopPropagation();
+              setSelectedFurniture(null);
               if (onRoomSelect) onRoomSelect(room, i);
               handlePointerDown(e, room, i);
             }}
@@ -790,30 +1662,63 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
               x={room.x} y={room.y}
               width={room.width} height={room.height}
               fill={fill}
-              stroke={isSelected ? '#2563eb' : style.stroke}
-              strokeWidth={isSelected ? WALL * 0.9 : WALL * 0.65}
+              stroke={isSelected ? '#D85740' : '#252622'}
+              strokeWidth={isSelected ? WALL * 1.1 : WALL * 0.75}
+              rx={0.08}
             />
 
-            {/* Inner wall shadow inset */}
+            {/* Inner wall subtle architectural double-line */}
             <rect
-              x={room.x + WALL * 0.35} y={room.y + WALL * 0.35}
-              width={room.width - WALL * 0.7} height={room.height - WALL * 0.7}
+              x={room.x + WALL * 0.3} y={room.y + WALL * 0.3}
+              width={Math.max(0, room.width - WALL * 0.6)} height={Math.max(0, room.height - WALL * 0.6)}
               fill="none"
-              stroke={isSelected ? '#93c5fd' : 'rgba(80,100,130,0.12)'}
-              strokeWidth={0.08}
+              stroke={isSelected ? '#D85740' : 'rgba(37, 38, 34, 0.12)'}
+              strokeWidth={0.05}
               style={{ pointerEvents: 'none' }}
             />
 
-            {/* Selection highlight */}
+            {/* Architectural Staircase Graphics */}
+            {isStairs && (
+              <g style={{ pointerEvents: 'none' }}>
+                {Array.from({ length: Math.min(10, Math.floor(room.height / 1.2)) }).map((_, stepIdx) => {
+                  const stepY = room.y + (stepIdx + 1) * (room.height / (Math.min(10, Math.floor(room.height / 1.2)) + 1));
+                  return (
+                    <line key={stepIdx}
+                      x1={room.x + 0.3} y1={stepY}
+                      x2={room.x + room.width - 0.3} y2={stepY}
+                      stroke="#B89A64" strokeWidth={0.1} strokeDasharray="0.6 0.3"
+                    />
+                  );
+                })}
+                {/* UP Arrow Indicator */}
+                <line x1={cx} y1={room.y + room.height * 0.8} x2={cx} y2={room.y + room.height * 0.25}
+                  stroke="#B89A64" strokeWidth={0.16} />
+                <polygon points={`${cx},${room.y + room.height * 0.2} ${cx - 0.35},${room.y + room.height * 0.32} ${cx + 0.35},${room.y + room.height * 0.32}`}
+                  fill="#B89A64" />
+                <circle cx={cx} cy={room.y + room.height * 0.8} r={0.22} fill="#B89A64" />
+              </g>
+            )}
+
+            {/* Duplex Double-Height Void Graphics */}
+            {isVoid && (
+              <g style={{ pointerEvents: 'none' }}>
+                <line x1={room.x + 0.2} y1={room.y + 0.2} x2={room.x + room.width - 0.2} y2={room.y + room.height - 0.2}
+                  stroke="#365FA8" strokeWidth={0.12} strokeDasharray="1 0.6" />
+                <line x1={room.x + room.width - 0.2} y1={room.y + 0.2} x2={room.x + 0.2} y2={room.y + room.height - 0.2}
+                  stroke="#365FA8" strokeWidth={0.12} strokeDasharray="1 0.6" />
+              </g>
+            )}
+
+            {/* Selection highlight & Atelier Handles */}
             {isSelected && (
               <g>
                 <rect
-                  x={room.x - 0.3} y={room.y - 0.3}
-                  width={room.width + 0.6} height={room.height + 0.6}
-                  fill="rgba(37,99,235,0.08)"
-                  stroke="#2563eb"
-                  strokeWidth={0.2}
-                  strokeDasharray="1 0.5"
+                  x={room.x - 0.25} y={room.y - 0.25}
+                  width={room.width + 0.5} height={room.height + 0.5}
+                  fill="rgba(216, 87, 64, 0.04)"
+                  stroke="#D85740"
+                  strokeWidth={0.14}
+                  strokeDasharray="0.8 0.4"
                   style={{ pointerEvents: 'none' }}
                 />
                 {/* Grab Handles for Edge Dragging */}
@@ -847,39 +1752,48 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
                 />
                 {/* Grab Handles for Vertex Dragging */}
                 <circle
-                  cx={room.x} cy={room.y} r={0.6}
-                  fill="white" stroke="#2563eb" strokeWidth={0.2}
+                  cx={room.x} cy={room.y} r={0.5}
+                  fill="#D85740" stroke="#FAF8F2" strokeWidth={0.12}
                   style={{ cursor: 'nwse-resize' }}
                   onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'topLeft'); }}
                 />
                 <circle
-                  cx={room.x + room.width} cy={room.y} r={0.6}
-                  fill="white" stroke="#2563eb" strokeWidth={0.2}
+                  cx={room.x + room.width} cy={room.y} r={0.5}
+                  fill="#D85740" stroke="#FAF8F2" strokeWidth={0.12}
                   style={{ cursor: 'nesw-resize' }}
                   onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'topRight'); }}
                 />
                 <circle
-                  cx={room.x} cy={room.y + room.height} r={0.6}
-                  fill="white" stroke="#2563eb" strokeWidth={0.2}
+                  cx={room.x} cy={room.y + room.height} r={0.5}
+                  fill="#D85740" stroke="#FAF8F2" strokeWidth={0.12}
                   style={{ cursor: 'nesw-resize' }}
                   onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'bottomLeft'); }}
                 />
                 <circle
-                  cx={room.x + room.width} cy={room.y + room.height} r={0.6}
-                  fill="white" stroke="#2563eb" strokeWidth={0.2}
+                  cx={room.x + room.width} cy={room.y + room.height} r={0.5}
+                  fill="#D85740" stroke="#FAF8F2" strokeWidth={0.12}
                   style={{ cursor: 'nwse-resize' }}
                   onPointerDown={(e) => { e.stopPropagation(); handlePointerDown(e, room, i, 'bottomRight'); }}
                 />
               </g>
             )}
 
-            <FurnitureLayer room={room} />
+            <FurnitureLayer
+              room={room}
+              roomIndex={i}
+              selectedFurniture={selectedFurniture}
+              onFurniturePointerDown={handleFurniturePointerDown}
+              onResizeFurnitureDown={handleFurnitureResizeDown}
+              onRotateFurniture={handleRotateFurniture}
+              onDuplicateFurniture={handleDuplicateFurniture}
+              onDeleteFurniture={handleDeleteFurniture}
+            />
 
             <text
               x={cx} y={cy - subSize * 0.5}
               textAnchor="middle" dominantBaseline="middle"
-              fill={labelColor} fontSize={labelSize}
-              fontFamily="Inter, system-ui, sans-serif" fontWeight="700"
+              fill="#252622" fontSize={labelSize}
+              fontFamily="'Plus Jakarta Sans', system-ui, sans-serif" fontWeight="600"
               style={{ pointerEvents: 'none', userSelect: 'none' }}
             >
               {room.name}
@@ -887,27 +1801,29 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
             <text
               x={cx} y={cy + labelSize * 0.5}
               textAnchor="middle" dominantBaseline="middle"
-              fill={labelColor} fontSize={subSize} opacity={0.65}
-              fontFamily="Inter, system-ui, sans-serif"
+              fill="#777970" fontSize={subSize}
+              fontFamily="'JetBrains Mono', monospace"
               style={{ pointerEvents: 'none', userSelect: 'none' }}
             >
               {Math.round(room.width)}×{Math.round(room.height)} ft · {sqft} sqft
             </text>
 
+            {/* Architectural Cobalt dimension strings */}
             {room.width > 5 && (
               <g>
-                <line x1={room.x} y1={room.y - 1.2}
-                  x2={room.x + room.width} y2={room.y - 1.2}
-                  stroke="#94a3b8" strokeWidth={0.1} />
-                <line x1={room.x} y1={room.y - 1.6}
-                  x2={room.x} y2={room.y - 0.8}
-                  stroke="#94a3b8" strokeWidth={0.1} />
-                <line x1={room.x + room.width} y1={room.y - 1.6}
-                  x2={room.x + room.width} y2={room.y - 0.8}
-                  stroke="#94a3b8" strokeWidth={0.1} />
-                <text x={room.x + room.width / 2} y={room.y - 1.6}
-                  textAnchor="middle" fill="#64748b" fontSize={subSize * 0.85}
-                  fontFamily="Inter, sans-serif"
+                <line x1={room.x} y1={room.y - 1.1}
+                  x2={room.x + room.width} y2={room.y - 1.1}
+                  stroke="#365FA8" strokeOpacity="0.75" strokeWidth={0.08} />
+                {/* 45-degree CAD architectural ticks */}
+                <line x1={room.x - 0.3} y1={room.y - 1.4}
+                  x2={room.x + 0.3} y2={room.y - 0.8}
+                  stroke="#365FA8" strokeWidth={0.1} />
+                <line x1={room.x + room.width - 0.3} y1={room.y - 1.4}
+                  x2={room.x + room.width + 0.3} y2={room.y - 0.8}
+                  stroke="#365FA8" strokeWidth={0.1} />
+                <text x={room.x + room.width / 2} y={room.y - 1.4}
+                  textAnchor="middle" fill="#365FA8" fontSize={subSize * 0.85}
+                  fontFamily="'JetBrains Mono', monospace" fontWeight="600"
                   style={{ pointerEvents: 'none', userSelect: 'none' }}>
                   {room.width} ft
                 </text>
@@ -916,19 +1832,20 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
 
             {room.height > 5 && (
               <g>
-                <line x1={room.x - 1.2} y1={room.y}
-                  x2={room.x - 1.2} y2={room.y + room.height}
-                  stroke="#94a3b8" strokeWidth={0.1} />
-                <line x1={room.x - 1.6} y1={room.y}
-                  x2={room.x - 0.8} y2={room.y}
-                  stroke="#94a3b8" strokeWidth={0.1} />
-                <line x1={room.x - 1.6} y1={room.y + room.height}
-                  x2={room.x - 0.8} y2={room.y + room.height}
-                  stroke="#94a3b8" strokeWidth={0.1} />
-                <text x={room.x - 1.6} y={room.y + room.height / 2}
-                  textAnchor="middle" fill="#64748b" fontSize={subSize * 0.85}
-                  fontFamily="Inter, sans-serif"
-                  transform={`rotate(-90 ${room.x - 1.6} ${room.y + room.height / 2})`}
+                <line x1={room.x - 1.1} y1={room.y}
+                  x2={room.x - 1.1} y2={room.y + room.height}
+                  stroke="#365FA8" strokeOpacity="0.75" strokeWidth={0.08} />
+                {/* 45-degree CAD architectural ticks */}
+                <line x1={room.x - 1.4} y1={room.y - 0.3}
+                  x2={room.x - 0.8} y2={room.y + 0.3}
+                  stroke="#365FA8" strokeWidth={0.1} />
+                <line x1={room.x - 1.4} y1={room.y + room.height - 0.3}
+                  x2={room.x - 0.8} y2={room.y + room.height + 0.3}
+                  stroke="#365FA8" strokeWidth={0.1} />
+                <text x={room.x - 1.4} y={room.y + room.height / 2}
+                  textAnchor="middle" fill="#365FA8" fontSize={subSize * 0.85}
+                  fontFamily="'JetBrains Mono', monospace" fontWeight="600"
+                  transform={`rotate(-90 ${room.x - 1.4} ${room.y + room.height / 2})`}
                   style={{ pointerEvents: 'none', userSelect: 'none' }}>
                   {room.height} ft
                 </text>
@@ -938,7 +1855,7 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
         );
       })}
 
-      {/* Pass 2: Draw doors and windows ON TOP of all walls so white gaps remain visible */}
+      {/* Pass 2: Draw doors and windows ON TOP */}
       {displayRooms.map((room, i) => (
         <g key={`overlay-${room.name}-${i}`} style={{ pointerEvents: 'none' }}>
           {/* Doors */}
@@ -949,26 +1866,26 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
         </g>
       ))}
 
-      {/* Scale bar */}
+      {/* Architectural Atelier Scale Bar */}
       <g>
-        <rect x={sbX - 0.3} y={sbY - 1.8}
-          width={scaleLen + 0.6} height={2.2}
-          fill="rgba(255,255,255,0.85)" rx={0.3} />
+        <rect x={sbX - 0.3} y={sbY - 1.9}
+          width={scaleLen + 0.6} height={2.3}
+          fill="#FAF8F2" stroke="#E7E1D5" strokeWidth={0.12} rx={0.2} />
         <line x1={sbX} y1={sbY - 0.6} x2={sbX + scaleLen} y2={sbY - 0.6}
-          stroke="#475569" strokeWidth={0.25} />
+          stroke="#252622" strokeWidth={0.18} />
         {[0, scaleLen / 2, scaleLen].map(x => (
           <line key={x}
-            x1={sbX + x} y1={sbY - 1} x2={sbX + x} y2={sbY - 0.2}
-            stroke="#475569" strokeWidth={0.2} />
+            x1={sbX + x} y1={sbY - 1.0} x2={sbX + x} y2={sbY - 0.2}
+            stroke="#252622" strokeWidth={0.14} />
         ))}
         <text x={sbX + scaleLen / 2} y={sbY - 1.3}
-          textAnchor="middle" fill="#1e293b"
-          fontSize={0.8} fontFamily="Inter, sans-serif" fontWeight="600">
-          Scale: 10 ft
+          textAnchor="middle" fill="#252622"
+          fontSize={0.72} fontFamily="'JetBrains Mono', monospace" fontWeight="600">
+          SCALE: 10 FT [1:50 ARCHITECTURAL]
         </text>
       </g>
 
-      {/* North arrow */}
+      {/* Architectural North Azimuth Compass */}
       {(() => {
         const ed = entryDir.toLowerCase();
         let angle = 0;
@@ -977,40 +1894,41 @@ const InteractiveBlueprint: React.FC<Props> = React.memo(({ rooms, selectedRoom,
         else if (ed.startsWith('w')) angle = 90;
         return (
           <g transform={`translate(${maxX - PAD * 0.5}, ${minY + PAD * 0.5}) rotate(${angle})`}>
-        <circle r={2.2} fill="rgba(255,255,255,0.92)" stroke="#cbd5e1" strokeWidth={0.2} />
-        <polygon points="0,-1.5 0.6,0.8 0,0.3 -0.6,0.8"
-          fill="#1e293b" />
-        <polygon points="0,1.5 0.6,-0.8 0,-0.3 -0.6,-0.8"
-          fill="#94a3b8" />
-        <text textAnchor="middle" y={-1.85} transform={`rotate(${-angle})`}
-          fill="#1e293b" fontSize={0.9}
-          fontFamily="Inter, sans-serif" fontWeight="800">N</text>
-        </g>
+            <circle r={2.0} fill="#FAF8F2" stroke="#E7E1D5" strokeWidth={0.15} />
+            <circle r={1.5} fill="none" stroke="rgba(37, 38, 34, 0.15)" strokeWidth={0.06} strokeDasharray="0.3 0.3" />
+            <polygon points="0,-1.5 0.45,0.6 0,0.2 -0.45,0.6"
+              fill="#252622" />
+            <polygon points="0,1.5 0.45,-0.6 0,-0.2 -0.45,-0.6"
+              fill="#E7E1D5" />
+            <text textAnchor="middle" y={-1.75} transform={`rotate(${-angle})`}
+              fill="#252622" fontSize={0.85}
+              fontFamily="'JetBrains Mono', monospace" fontWeight="700">N</text>
+          </g>
         );
       })()}
 
-      {/* Legend */}
+      {/* Atelier Zone Legend */}
       {displayRooms.length > 0 && (() => {
         const uniqueTypes = [...new Set(displayRooms.map(r => r.name))].slice(0, 5);
         return (
           <g transform={`translate(${maxX - PAD * 0.8}, ${minY + PAD * 3.5})`}>
             <rect x={-0.3} y={-0.5}
-              width={PAD * 0.9} height={uniqueTypes.length * 1.4 + 1}
-              fill="rgba(255,255,255,0.88)" stroke="#e2e8f0" strokeWidth={0.15} rx={0.3} />
+              width={PAD * 0.9} height={uniqueTypes.length * 1.4 + 1.2}
+              fill="#FAF8F2" stroke="#E7E1D5" strokeWidth={0.12} rx={0.2} />
             <text x={PAD * 0.4 / 2} y={0.2}
-              textAnchor="middle" fill="#1e293b"
-              fontSize={0.7} fontFamily="Inter, sans-serif" fontWeight="700">
-              LEGEND
+              textAnchor="middle" fill="#252622"
+              fontSize={0.62} fontFamily="'JetBrains Mono', monospace" fontWeight="600" letterSpacing="0.04">
+              ZONES
             </text>
             {uniqueTypes.map((name, idx) => {
-              const { fill, labelColor, stroke } = getRoomStyle(name);
+              const { fill, stroke } = getRoomStyle(name);
               return (
                 <g key={name} transform={`translate(0, ${idx * 1.4 + 1.0})`}>
                   <rect x={0} y={-0.45} width={0.8} height={0.7}
-                    fill={fill} stroke={stroke} strokeWidth={0.1} />
+                    fill={fill} stroke={stroke} strokeWidth={0.08} rx={0.06} />
                   <text x={1.1} y={0.1}
-                    fill={labelColor} fontSize={0.62}
-                    fontFamily="Inter, sans-serif">
+                    fill="#474943" fontSize={0.58}
+                    fontFamily="'Plus Jakarta Sans', sans-serif">
                     {name.length > 12 ? name.slice(0, 12) + '…' : name}
                   </text>
                 </g>

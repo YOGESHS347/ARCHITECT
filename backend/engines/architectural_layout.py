@@ -50,6 +50,9 @@ def _get_min_w(room_name: str) -> float:
     if "kitchen" in n: return 7.0
     if "foyer" in n: return 6.0
     if "corridor" in n: return 4.0
+    if "gazebo" in n: return 7.0
+    if "terrace" in n or "garden" in n: return 8.0
+    if "void" in n: return 8.0
     return 5.0
 
 def _calculate_bay_widths(L: float, l_list: list, s_list: list, r_list: list) -> tuple[float, float, float]:
@@ -345,6 +348,17 @@ WEIGHTS = {
     "Family Lounge": 8,
     "Study": 5,
     "Terrace": 15,
+    "Pooja Room": 4,
+    "Pooja": 4,
+    "Duplex Void": 10,
+    "Duplex Void (Open to Below)": 10,
+    "Rooftop Garden": 12,
+    "Covered Gazebo": 8,
+    "Gazebo": 8,
+    "Solar & Utility Area": 6,
+    "Open Rooftop Terrace": 15,
+    "Private Sundeck / Terrace": 12,
+    "Garden / Lawn": 8,
 }
 
 def _get_weight(name: str) -> float:
@@ -365,12 +379,15 @@ def _bsp_pack(rect: tuple[float, float, float, float], rooms: list[dict], axis=N
         # Clamp to minimum — never produce a sliver room
         w = max(w, MIN_ROOM_DIM)
         h = max(h, MIN_ROOM_DIM)
-        door_pos = h * 0.4 if door_wall in ("left", "right") else w * 0.4
-        doors = [_door(door_wall, door_pos)]
+        door_span = h if door_wall in ("left", "right") else w
+        safe_pos = max(DOOR_W / 2 + 0.6, min(door_span - DOOR_W / 2 - 0.6, door_span * 0.4)) if door_span >= DOOR_W + 1.2 else door_span / 2
+        doors = [_door(door_wall, round(safe_pos, 1))]
         if name == "Living Room":
-            doors.append(_door("bottom", w * 0.4))
+            safe_bottom = max(DOOR_W / 2 + 0.6, min(w - DOOR_W / 2 - 0.6, w * 0.4)) if w >= DOOR_W + 1.2 else w / 2
+            doors.append(_door("bottom", round(safe_bottom, 1)))
         elif name == "Parking":
-            doors.append({"wall": "top", "position": round(w * 0.7), "width": DOOR_W, "is_garage": True})
+            safe_top = max(DOOR_W / 2 + 0.6, min(w - DOOR_W / 2 - 0.6, w / 2)) if w >= DOOR_W + 1.2 else w / 2
+            doors.append({"wall": "top", "position": round(safe_top, 1), "width": DOOR_W, "is_garage": True})
             
         return [{
             "name": name, 
@@ -438,6 +455,21 @@ def _bsp_pack(rect: tuple[float, float, float, float], rooms: list[dict], axis=N
     return _bsp_pack(rect1, left_rooms, next_axis, door_wall) + _bsp_pack(rect2, right_rooms, next_axis, door_wall)
 
 
+def _get_min_h(r_name: str) -> float:
+    n = r_name.lower()
+    if "parking" in n: return 18.0
+    if "staircase" in n: return STAIR_H
+    if "living" in n: return 12.0
+    if "master" in n: return 11.0
+    if "bedroom" in n: return 9.0
+    if "family" in n: return 9.0
+    if "dining" in n: return 8.0
+    if "kitchen" in n: return 7.0
+    if "bath" in n: return 5.0
+    if "utility" in n: return 5.0
+    return MIN_ROOM_DIM
+
+
 def _stack_in_bay(
     x: float, y_start: float, bay_w: float, bay_h: float,
     rooms: list[dict], door_wall: str = "right"
@@ -450,20 +482,6 @@ def _stack_in_bay(
     """
     if not rooms:
         return []
-
-    def _get_min_h(r_name: str) -> float:
-        n = r_name.lower()
-        if "parking" in n: return 18.0
-        if "staircase" in n: return STAIR_H
-        if "living" in n: return 12.0
-        if "master" in n: return 11.0
-        if "bedroom" in n: return 9.0
-        if "family" in n: return 9.0
-        if "dining" in n: return 8.0
-        if "kitchen" in n: return 7.0
-        if "bath" in n: return 5.0
-        if "utility" in n: return 5.0
-        return MIN_ROOM_DIM
 
     total_weight = sum(r["weight"] for r in rooms)
     n = len(rooms)
@@ -509,26 +527,24 @@ def _stack_in_bay(
         if is_last and "staircase" not in room["name"].lower():
             # Give the last room exactly the remaining space — clamped to bay boundary
             remaining = round(y_start + bay_h - cursor_y, 2)
-            room_h = max(min_room_h, remaining)
+            room_h = max(0.0, remaining)
         else:
             room_h = round(room_h, 2)
-
-        if "staircase" not in room["name"].lower():
-            room_h = max(room_h, min_room_h)
         name = room["name"]
 
-        # Door placement: centred at 40% of the room's span
-        if door_wall in ("left", "right"):
-            door_pos = round(room_h * 0.4, 1)
-        else:
-            door_pos = round(bay_w * 0.4, 1)
+        # Door placement: safely clamped within the room's host wall
+        door_span = room_h if door_wall in ("left", "right") else bay_w
+        safe_door_pos = max(DOOR_W / 2 + 0.6, min(door_span - DOOR_W / 2 - 0.6, door_span * 0.4)) if door_span >= DOOR_W + 1.2 else door_span / 2
+        door_pos = round(safe_door_pos, 1)
 
         if name == "Parking":
-            doors = [{"wall": "top", "position": round(bay_w * 0.3, 1), "width": DOOR_W, "is_garage": True}]
+            safe_top = max(DOOR_W / 2 + 0.6, min(bay_w - DOOR_W / 2 - 0.6, bay_w / 2)) if bay_w >= DOOR_W + 1.2 else bay_w / 2
+            doors = [{"wall": "top", "position": round(safe_top, 1), "width": DOOR_W, "is_garage": True}]
         else:
             doors = [_door(door_wall, door_pos)]
             if name == "Living Room":
-                doors.append(_door("bottom", round(bay_w * 0.4, 1)))
+                safe_bottom = max(DOOR_W / 2 + 0.6, min(bay_w - DOOR_W / 2 - 0.6, bay_w * 0.4)) if bay_w >= DOOR_W + 1.2 else bay_w / 2
+                doors.append(_door("bottom", round(safe_bottom, 1)))
 
         result.append({
             "name": name,
@@ -609,7 +625,8 @@ def _build_ground_floor(
     
     right_rooms = new_right
     # Only append Terrace if there is room left
-    if len(right_rooms) * MIN_ROOM_DIM < W:
+    right_min_needed = sum(_get_min_h(r) for r in right_rooms)
+    if right_min_needed + _get_min_h("Terrace") <= W:
         right_rooms.append("Terrace")
     
     if duplex and not any("Staircase" in r for r in spine_rooms + left_rooms + right_rooms):
@@ -702,10 +719,8 @@ def _build_upper_floor(
         left_rooms.append("Family Lounge")
         left_rooms.append("Balcony" if balcony else "Terrace")
         
-    if not right_beds:
-        right_rooms.append("Terrace")
-    else:
-        right_rooms.append("Walk-in Closet")
+    right_min_needed = sum(_get_min_h(r) for r in right_rooms)
+    if right_min_needed + _get_min_h("Terrace") <= W:
         right_rooms.append("Terrace")
         
     staircases = [r for r in spine_rooms if "Staircase" in r]
@@ -780,7 +795,7 @@ def _post_process_rooms(rooms: list[dict]) -> list[dict]:
                 closet["name"] = "Walk-in Closet"
                 closet["x"] = round(r["x"] + new_w, 2)
                 closet["width"] = round(w - new_w, 2)
-                closet["doors"] = [{"wall": "left", "position": 1.5, "width": 2.5}]
+                closet["doors"] = [{"wall": "left", "position": round(h * 0.5, 1), "width": 2.5}]
                 final_rooms.append(closet)
             elif h > w * 1.8:
                 new_h = round(w * 1.5, 2)
@@ -789,7 +804,7 @@ def _post_process_rooms(rooms: list[dict]) -> list[dict]:
                 closet["name"] = "Walk-in Closet"
                 closet["y"] = round(r["y"] + new_h, 2)
                 closet["height"] = round(h - new_h, 2)
-                closet["doors"] = [{"wall": "bottom", "position": 1.5, "width": 2.5}]
+                closet["doors"] = [{"wall": "bottom", "position": round(w * 0.5, 1), "width": 2.5}]
                 final_rooms.append(closet)
                 
         final_rooms.append(r)
@@ -928,6 +943,28 @@ FURNITURE_CATALOG: dict[str, list[tuple]] = {
         ("Bookshelf",      3, 1),
         ("Bench",          3, 1.5),
     ],
+    "pooja": [
+        ("Pooja Mandir / Alter", 3, 2),
+        ("Diya Stand", 1, 1),
+    ],
+    "gazebo": [
+        ("Gazebo Seating Bench", 4, 1.5),
+        ("Coffee Table", 2, 2),
+    ],
+    "garden": [
+        ("Lawn Bench", 4, 1.5),
+        ("Plant Bed", 3, 2),
+        ("Planter", 2, 2),
+    ],
+    "solar": [
+        ("Solar Inverter Unit", 3, 2),
+        ("Storage Box", 3, 1.5),
+    ],
+    "sundeck": [
+        ("Sun Lounger", 2, 5),
+        ("Parasol Umbrella", 3, 3),
+    ],
+    "void": [],
 }
 
 SWING = 3.0   # door swing radius in ft
@@ -1153,6 +1190,454 @@ def inject_furniture(layout: dict) -> dict:
             room["furniture"] = placed
 
     return layout
+
+
+def _extract_floor_features(floor: dict) -> None:
+    """
+    Extracts explicit top-level walls, doors, and windows collections for the floor
+    while preserving individual room representations for backwards compatibility.
+    """
+    rooms = floor.get("rooms", [])
+    doors = []
+    windows = []
+    walls = []
+
+    for r in rooms:
+        rx, ry, rw, rh = r["x"], r["y"], r["width"], r["height"]
+        rname = r.get("name", "")
+
+        walls.append({
+            "room": rname,
+            "start": {"x": round(rx, 2), "y": round(ry, 2)},
+            "end": {"x": round(rx + rw, 2), "y": round(ry, 2)},
+            "orientation": "horizontal",
+            "type": "exterior" if ry <= 0.05 else "interior"
+        })
+        walls.append({
+            "room": rname,
+            "start": {"x": round(rx + rw, 2), "y": round(ry, 2)},
+            "end": {"x": round(rx + rw, 2), "y": round(ry + rh, 2)},
+            "orientation": "vertical",
+            "type": "interior"
+        })
+        walls.append({
+            "room": rname,
+            "start": {"x": round(rx, 2), "y": round(ry + rh, 2)},
+            "end": {"x": round(rx + rw, 2), "y": round(ry + rh, 2)},
+            "orientation": "horizontal",
+            "type": "interior"
+        })
+        walls.append({
+            "room": rname,
+            "start": {"x": round(rx, 2), "y": round(ry, 2)},
+            "end": {"x": round(rx, 2), "y": round(ry + rh, 2)},
+            "orientation": "vertical",
+            "type": "interior"
+        })
+
+        for d in r.get("doors", []):
+            doors.append({
+                "room": rname,
+                "wall": d.get("wall"),
+                "position": d.get("position", 0.0),
+                "width": d.get("width", 3.0),
+                "type": "garage_door" if d.get("is_garage") else d.get("type", "single")
+            })
+
+        for w in r.get("windows", []):
+            windows.append({
+                "room": rname,
+                "wall": w.get("wall"),
+                "position": w.get("position", 0.0),
+                "width": w.get("width", 4.0),
+                "sill_height": w.get("sill_height", 3.0),
+            })
+
+    floor["walls"] = walls
+    floor["doors"] = doors
+    floor["windows"] = windows
+
+
+def build_multi_floor_layout(spec: dict) -> dict:
+    """
+    Deterministic Multi-Floor Layout Partitioning Engine.
+    Generates level-by-level floor plates, locks staircase vertical shafts across
+    all floors, handles duplex voids, terrace parapets, and returns enriched floor structures.
+    """
+    raw_w = float(spec.get("plot_width", 30))
+    raw_l = float(spec.get("plot_length", 40))
+    unit = str(spec.get("measurement_unit", "ft")).lower()
+
+    L = raw_w
+    W = raw_l
+    if unit == "m":
+        L = round(L * 3.28084, 2)
+        W = round(W * 3.28084, 2)
+
+    entry_dir = str(spec.get("entry_direction", "east")).strip().lower()
+    is_duplex = bool(spec.get("is_duplex", False))
+    budget_tier = str(spec.get("budget_tier", "standard")).strip().lower()
+
+    floors_spec = spec.get("floors", [])
+    floors_count = int(spec.get("floors_count", len(floors_spec) or 1))
+
+    # Generate default floor specs if none provided
+    if not floors_spec:
+        floors_spec = []
+        for f_idx in range(floors_count):
+            if f_idx == 0:
+                floors_spec.append({
+                    "level": 0,
+                    "name": "Ground Floor",
+                    "floor_type": "ground",
+                    "required_rooms": [
+                        {"type": "living", "name": "Living Room"},
+                        {"type": "kitchen", "name": "Kitchen"},
+                        {"type": "dining", "name": "Dining Room"},
+                        {"type": "pooja", "name": "Pooja Room"},
+                        {"type": "bedroom", "name": "Guest Bedroom", "attached_bath": True},
+                        {"type": "parking", "name": "Car Parking"},
+                        {"type": "garden", "name": "Garden / Lawn"},
+                    ]
+                })
+            elif f_idx == floors_count - 1 and floors_count >= 3:
+                floors_spec.append({
+                    "level": f_idx,
+                    "name": "Rooftop Terrace",
+                    "floor_type": "terrace",
+                    "required_rooms": [
+                        {"type": "garden", "name": "Rooftop Garden"},
+                        {"type": "gazebo", "name": "Covered Gazebo"},
+                        {"type": "utility_solar", "name": "Solar & Utility Area"},
+                    ]
+                })
+            else:
+                floors_spec.append({
+                    "level": f_idx,
+                    "name": f"Floor {f_idx}",
+                    "floor_type": "duplex_upper" if (is_duplex and f_idx == 1) else "upper",
+                    "required_rooms": [
+                        {"type": "master_bedroom", "name": "Master Suite", "attached_bath": True},
+                        {"type": "bedroom", "name": f"Bedroom {f_idx + 1}", "attached_bath": True},
+                        {"type": "family_lounge", "name": "Family Lounge"},
+                        {"type": "balcony", "name": "Balcony"},
+                    ]
+                })
+
+    # Setbacks
+    front_setback, rear_setback, side_setback = 0.0, 0.0, 0.0
+    if L >= 32 and W >= 25:
+        front_setback = 9.84
+        rear_setback = 6.56
+        side_setback = 4.92
+
+    buildable_W = W - front_setback - rear_setback
+    buildable_L = L - 2 * side_setback
+
+    if buildable_L < MIN_ROOM_DIM * 3 or buildable_W < MIN_ROOM_DIM * 3:
+        front_setback = rear_setback = side_setback = 0.0
+        buildable_W = W
+        buildable_L = L
+
+    # Calculate locked structural bay widths across all floors
+    w2 = max(8.0, min(12.0, round(buildable_L * 0.28, 2)))
+    w1 = round((buildable_L - w2) * 0.5, 2)
+    w3 = round(buildable_L - w1 - w2, 2)
+    x1 = 0.0
+    x2 = w1
+    x3 = w1 + w2
+
+    # Calculate locked staircase position across all levels
+    has_stairs = floors_count > 1 or any(
+        any("stair" in r.get("name", "").lower() or r.get("type") == "stairs" for r in f.get("required_rooms", []))
+        for f in floors_spec
+    )
+    stair_h = STAIR_H
+    if entry_dir in ("south", "s", "west", "w"):
+        stair_y = 0.0
+    else:
+        stair_y = max(0.0, round(buildable_W - stair_h, 2))
+
+    global_stair_rect = {
+        "x": round(x2 + side_setback, 2),
+        "y": round(stair_y + front_setback, 2),
+        "width": round(w2, 2),
+        "depth": float(stair_h),
+    }
+
+    result_floors = []
+    ground_living_rect = None
+
+    for floor_idx, floor_cfg in enumerate(floors_spec):
+        lvl_num = floor_cfg.get("level", floor_idx)
+        lvl_name = floor_cfg.get("name", f"Floor {lvl_num}" if lvl_num > 0 else "Ground Floor")
+        f_type = floor_cfg.get("floor_type", "ground" if lvl_num == 0 else "upper")
+        req_rooms = floor_cfg.get("required_rooms", [])
+
+        left_rooms = []
+        right_rooms = []
+        spine_rooms = []
+
+        if f_type == "ground" or lvl_num == 0:
+            # ── GROUND FLOOR ─────────────────────────────────────────────────
+            has_living = any("living" in r.get("name", "").lower() or r.get("type") == "living" for r in req_rooms)
+            has_kitchen = any("kitchen" in r.get("name", "").lower() or r.get("type") == "kitchen" for r in req_rooms)
+            has_dining = any("dining" in r.get("name", "").lower() or r.get("type") == "dining" for r in req_rooms)
+            has_pooja = any("pooja" in r.get("name", "").lower() or r.get("type") == "pooja" for r in req_rooms)
+
+            right_rooms.append("Living Room" if has_living else "Living Room")
+            if has_dining or True:
+                right_rooms.append("Dining Room")
+            if has_kitchen or True:
+                right_rooms.append("Kitchen")
+            if has_pooja:
+                right_rooms.append("Pooja Room")
+
+            has_parking = any("parking" in r.get("name", "").lower() or r.get("type") == "parking" for r in req_rooms)
+            has_garden = any("garden" in r.get("name", "").lower() or r.get("type") == "garden" for r in req_rooms) or floor_cfg.get("has_garden")
+            if has_parking:
+                left_rooms.append("Parking")
+            if has_garden:
+                left_rooms.append("Garden / Lawn")
+
+            bed_count = 0
+            for r in req_rooms:
+                if "bedroom" in r.get("name", "").lower() or r.get("type") in ("bedroom", "guest_bedroom"):
+                    bed_count += 1
+                    bname = r.get("name") or "Guest Bedroom"
+                    left_rooms.append(bname)
+                    if r.get("attached_bath", True):
+                        left_rooms.append(f"Bathroom {bed_count}")
+
+            if not any("bedroom" in r.lower() for r in left_rooms) and not has_parking:
+                left_rooms.append("Study Room")
+
+            spine_rooms.append("Foyer")
+            if has_stairs:
+                spine_rooms.append("Staircase")
+            spine_rooms.append("Corridor")
+
+            l_list = [{"name": n, "weight": _get_weight(n)} for n in left_rooms]
+            s_list = [{"name": n, "weight": _get_weight(n)} for n in spine_rooms]
+            r_list = [{"name": n, "weight": _get_weight(n)} for n in right_rooms]
+
+            fl_rooms = []
+            fl_rooms.extend(_stack_in_bay(x1, 0, w1, buildable_W, l_list, door_wall="right"))
+            fl_rooms.extend(_stack_in_bay(x3, 0, w3, buildable_W, r_list, door_wall="left"))
+
+            if has_stairs:
+                stair_room = {
+                    "name": "Staircase",
+                    "x": round(x2, 2),
+                    "y": round(stair_y, 2),
+                    "width": round(w2, 2),
+                    "height": stair_h,
+                    "doors": [
+                        {"wall": "top", "position": round(w2 / 2 - 1.5, 1), "width": 3.0},
+                        {"wall": "bottom", "position": round(w2 / 2 - 1.5, 1), "width": 3.0}
+                    ],
+                    "furniture": []
+                }
+                fl_rooms.append(stair_room)
+                s_others = [r for r in s_list if "staircase" not in r["name"].lower()]
+                if stair_y <= 0.1:
+                    fl_rooms.extend(_stack_in_bay(x2, stair_h, w2, buildable_W - stair_h, s_others, door_wall="left"))
+                elif stair_y >= buildable_W - stair_h - 0.1:
+                    fl_rooms.extend(_stack_in_bay(x2, 0, w2, stair_y, s_others, door_wall="left"))
+                else:
+                    fl_rooms.extend(_stack_in_bay(x2, 0, w2, stair_y, s_others[:1], door_wall="left"))
+                    fl_rooms.extend(_stack_in_bay(x2, stair_y + stair_h, w2, buildable_W - stair_y - stair_h, s_others[1:], door_wall="left"))
+            else:
+                fl_rooms.extend(_stack_in_bay(x2, 0, w2, buildable_W, s_list, door_wall="left"))
+
+            for r in fl_rooms:
+                if "living" in r["name"].lower():
+                    ground_living_rect = {
+                        "x": r["x"],
+                        "y": r["y"],
+                        "width": r["width"],
+                        "height": r["height"]
+                    }
+                    break
+
+        elif f_type in ("terrace", "rooftop"):
+            # ── ROOFTOP / TERRACE ────────────────────────────────────────────
+            fl_rooms = []
+            if has_stairs:
+                stair_room = {
+                    "name": "Staircase Headroom / Terrace Landing",
+                    "x": round(x2, 2),
+                    "y": round(stair_y, 2),
+                    "width": round(w2, 2),
+                    "height": stair_h,
+                    "doors": [
+                        {"wall": "top" if stair_y <= 0.1 else "bottom", "position": round(w2 / 2 - 1.5, 1), "width": 3.0}
+                    ],
+                    "furniture": []
+                }
+                fl_rooms.append(stair_room)
+
+            has_roof_garden = any("garden" in r.get("name", "").lower() or r.get("type") == "garden" for r in req_rooms) or floor_cfg.get("has_garden")
+            has_gazebo = any("gazebo" in r.get("name", "").lower() or r.get("type") == "gazebo" for r in req_rooms)
+            has_solar = any("solar" in r.get("name", "").lower() or "utility" in r.get("name", "").lower() or r.get("type") == "utility_solar" for r in req_rooms)
+
+            l_terr = [{"name": "Open Rooftop Terrace", "weight": 14}]
+            if has_roof_garden:
+                l_terr.append({"name": "Rooftop Garden", "weight": 10})
+
+            r_terr = []
+            if has_gazebo:
+                r_terr.append({"name": "Covered Gazebo", "weight": 8})
+            if has_solar:
+                r_terr.append({"name": "Solar & Utility Area", "weight": 6})
+            r_terr.append({"name": "Private Sundeck / Terrace", "weight": 12})
+
+            fl_rooms.extend(_stack_in_bay(x1, 0, w1, buildable_W, l_terr, door_wall="right"))
+            fl_rooms.extend(_stack_in_bay(x3, 0, w3, buildable_W, r_terr, door_wall="left"))
+
+            s_rem = [{"name": "Terrace Walkway", "weight": 6}]
+            if stair_y <= 0.1:
+                fl_rooms.extend(_stack_in_bay(x2, stair_h, w2, buildable_W - stair_h, s_rem, door_wall="left"))
+            else:
+                fl_rooms.extend(_stack_in_bay(x2, 0, w2, stair_y, s_rem, door_wall="left"))
+
+        else:
+            # ── UPPER FLOORS (Level 1, 2, etc.) ──────────────────────────────
+            fl_rooms = []
+            is_duplex_floor = (is_duplex and lvl_num == 1) or f_type == "duplex_upper"
+            if is_duplex_floor and ground_living_rect:
+                void_room = {
+                    "name": "Duplex Void (Open to Below)",
+                    "x": ground_living_rect["x"],
+                    "y": ground_living_rect["y"],
+                    "width": ground_living_rect["width"],
+                    "height": ground_living_rect["height"],
+                    "doors": [],
+                    "furniture": []
+                }
+                fl_rooms.append(void_room)
+
+                rem_y_start = ground_living_rect["y"] + ground_living_rect["height"]
+                rem_h = buildable_W - rem_y_start
+                if rem_h >= MIN_ROOM_DIM:
+                    right_rem = [
+                        {"name": "Family Lounge", "weight": 8},
+                        {"name": "Balcony", "weight": 4}
+                    ]
+                    fl_rooms.extend(_stack_in_bay(x3, rem_y_start, w3, rem_h, right_rem, door_wall="left"))
+            else:
+                r_names = ["Family Lounge", "Balcony"]
+                for r in req_rooms:
+                    if r.get("type") in ("bedroom", "master_bedroom") and len(left_rooms) >= 2:
+                        r_names.insert(0, r.get("name", "Bedroom"))
+                r_list = [{"name": n, "weight": _get_weight(n)} for n in r_names]
+                fl_rooms.extend(_stack_in_bay(x3, 0, w3, buildable_W, r_list, door_wall="left"))
+
+            left_rooms = []
+            bath_i = 1
+            for r in req_rooms:
+                rtype = r.get("type", "")
+                rname = r.get("name", "")
+                if "master" in rtype or "master" in rname.lower():
+                    left_rooms.append("Master Bedroom")
+                    if r.get("attached_bath", True):
+                        left_rooms.append(f"Ensuite Bathroom {bath_i}")
+                        bath_i += 1
+                elif "bedroom" in rtype or "bedroom" in rname.lower():
+                    left_rooms.append(rname or f"Bedroom {lvl_num + 1}")
+                    if r.get("attached_bath", True):
+                        left_rooms.append(f"Bathroom {bath_i}")
+                        bath_i += 1
+
+            if not left_rooms:
+                left_rooms = ["Master Bedroom", "Ensuite Bathroom", "Balcony"]
+
+            l_list = [{"name": n, "weight": _get_weight(n)} for n in left_rooms]
+            fl_rooms.extend(_stack_in_bay(x1, 0, w1, buildable_W, l_list, door_wall="right"))
+
+            if has_stairs:
+                stair_room = {
+                    "name": "Staircase",
+                    "x": round(x2, 2),
+                    "y": round(stair_y, 2),
+                    "width": round(w2, 2),
+                    "height": stair_h,
+                    "doors": [
+                        {"wall": "top", "position": round(w2 / 2 - 1.5, 1), "width": 3.0},
+                        {"wall": "bottom", "position": round(w2 / 2 - 1.5, 1), "width": 3.0}
+                    ],
+                    "furniture": []
+                }
+                fl_rooms.append(stair_room)
+                s_rem = [{"name": "Corridor", "weight": 6}]
+                if stair_y <= 0.1:
+                    fl_rooms.extend(_stack_in_bay(x2, stair_h, w2, buildable_W - stair_h, s_rem, door_wall="left"))
+                elif stair_y >= buildable_W - stair_h - 0.1:
+                    fl_rooms.extend(_stack_in_bay(x2, 0, w2, stair_y, s_rem, door_wall="left"))
+                else:
+                    fl_rooms.extend(_stack_in_bay(x2, 0, w2, stair_y, s_rem, door_wall="left"))
+
+        # Apply setback shift
+        for r in fl_rooms:
+            if side_setback > 0 or front_setback > 0:
+                r["x"] = round(r["x"] + side_setback, 2)
+                r["y"] = round(r["y"] + front_setback, 2)
+
+        # Unique naming per floor
+        used = set()
+        for r in fl_rooms:
+            orig = r["name"]
+            if orig not in used:
+                used.add(orig)
+                continue
+            k = 2
+            while f"{orig} {k}" in used:
+                k += 1
+            r["name"] = f"{orig} {k}"
+            used.add(r["name"])
+
+        floor_dict = {
+            "level": lvl_num,
+            "name": lvl_name,
+            "floor_type": f_type,
+            "rooms": fl_rooms,
+            "stairs": global_stair_rect if has_stairs else None,
+            "plot_width": L,
+            "plot_height": W,
+        }
+        result_floors.append(floor_dict)
+
+    layout = {"floors": result_floors}
+
+    # Window placement
+    place_windows(layout, plot_w=float(L), plot_h=float(W))
+
+    # Furniture injection
+    layout = inject_furniture(layout)
+
+    # Circulation paths
+    compute_paths(layout)
+
+    # Extract top-level walls, doors, windows for each floor
+    for f in layout["floors"]:
+        _extract_floor_features(f)
+
+    # Validation report & warnings
+    circulation_warnings: list[str] = []
+    layout["circulation_warnings"] = circulation_warnings
+    validation_report: list[dict[str, str]] = []
+    layout["validation_report"] = validation_report
+
+    for f in layout["floors"]:
+        unreachable = f.get("circulation", {}).get("unreachable", [])
+        for u in unreachable:
+            circulation_warnings.append(f"{f.get('name')}: {u} is unreachable.")
+
+    if not validation_report:
+        validation_report.append({"severity": "info", "room": "-", "message": "Multi-floor geometry aligned successfully."})
+
+    return layout
+
 
 
 

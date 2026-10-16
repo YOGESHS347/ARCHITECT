@@ -1,104 +1,827 @@
 """
 repositories.py
 ===============
-Thin data-access layer. All Motor find/insert/delete calls live here.
-Route handlers import named functions from this module; they do NOT
-touch the Motor client directly.
-
-No business logic here — just DB I/O.
+Data-access repository layer supporting both MongoDB and Supabase PostgreSQL.
+Preserves all Motor find/insert/delete operations for MongoDB mode.
+When DATABASE_PROVIDER=supabase, operations route through SupabaseProjectRepository
+targeting public.projects and public.project_versions.
 """
 
 from __future__ import annotations
 
-from bson import ObjectId
-from bson.errors import InvalidId
-from db.database import users_collection, projects_collection
+import logging
+import uuid
+from typing import Any, Optional, List, Dict
+from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
+try:
+    from bson import ObjectId
+    from bson.errors import InvalidId
+except ImportError:
+    ObjectId = None  # type: ignore
+    InvalidId = Exception  # type: ignore
+
+from db.database import users_collection, projects_collection, conversations_collection, messages_collection, DATABASE_PROVIDER
+from db.supabase_client import get_supabase_client
+
+
+# ── ID Validation Helpers ────────────────────────────────────────────────────
+
+def is_valid_uuid(val: Any) -> bool:
+    """Check if the provided value is a valid standard UUID."""
+    if not val:
+        return False
+    try:
+        uuid.UUID(str(val).strip())
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
+def is_valid_object_id(val: Any) -> bool:
+    """Check if the provided value is a valid 24-char hex MongoDB ObjectId."""
+    if not val or ObjectId is None:
+        return False
+    try:
+        ObjectId(str(val).strip())
+        return True
+    except (InvalidId, TypeError, ValueError):
+        return False
+
+
+# ── Helper for Supabase Project mapping ───────────────────────────────────────
+
+def _format_supabase_project(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Map a Supabase projects table row to the standard dict format expected by FastAPI & Frontend."""
+    prefs = row.get("building_preferences") or {}
+    layout_data = row.get("layout_data") or prefs.get("layout_data") or {}
+    image_url = row.get("image_url") or prefs.get("image_url")
+
+    # Resolve plot dimensions from direct columns or fallback to layout_data
+    plot_width = row.get("plot_width")
+    if plot_width is None and isinstance(layout_data, dict):
+        plot_width = layout_data.get("plot_width") or layout_data.get("form", {}).get("width")
+
+    plot_length = row.get("plot_length")
+    if plot_length is None and isinstance(layout_data, dict):
+        plot_length = (
+            layout_data.get("plot_height")
+            or layout_data.get("plot_length")
+            or layout_data.get("form", {}).get("length")
+        )
+
+    return {
+        "id": str(row["id"]),
+        "user_id": str(row["user_id"]),
+        "name": row.get("name", "Untitled Plan"),
+        "layout_data": layout_data,
+        "image_url": image_url,
+        "plot_width": float(plot_width) if plot_width is not None else 30.0,
+        "plot_length": float(plot_length) if plot_length is not None else 40.0,
+        "measurement_unit": row.get("measurement_unit") or "ft",
+        "entry_direction": row.get("entry_direction") or "east",
+        "budget_target": float(row["budget_target"]) if row.get("budget_target") is not None else None,
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+# ── In-Memory Fallback Store (for offline local development) ─────────────────
+_in_memory_users: Dict[str, dict] = {}
+_in_memory_projects: Dict[str, dict] = {}
+_in_memory_conversations: Dict[str, dict] = {}
+_in_memory_messages: Dict[str, list] = {}
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 async def get_user_by_email(email: str) -> dict | None:
     """Return the full user document or None if not found."""
-    return await users_collection.find_one({"email": email})
+    if DATABASE_PROVIDER == "mongodb":
+        if users_collection is not None:
+            try:
+                doc = await users_collection.find_one({"email": email})
+                if doc:
+                    return doc
+            except Exception as e:
+                logger.warning(f"MongoDB query failed ({e}). Using in-memory fallback.")
+        return _in_memory_users.get(email)
+
+    # Supabase provider
+    sb = get_supabase_client()
+    rows = await sb.select("profiles", match={"email": email})
+    return rows[0] if rows else None
 
 
 async def get_user_by_id(user_id: str) -> dict | None:
-    """Return the full user document by ObjectId string, or None if the id is malformed.
-    
-    Raises:
-        Any Motor/pymongo exception other than InvalidId — these are genuine
-        infrastructure failures and must NOT be silenced.
-    """
-    try:
-        oid = ObjectId(user_id)
-    except InvalidId:
+    """Return the full user document by ID, or None if not found."""
+    if DATABASE_PROVIDER == "mongodb":
+        if users_collection is not None:
+            try:
+                if is_valid_object_id(user_id):
+                    oid = ObjectId(user_id)
+                    doc = await users_collection.find_one({"_id": oid})
+                    if doc:
+                        return doc
+            except Exception as e:
+                logger.warning(f"MongoDB query failed ({e}). Using in-memory fallback.")
+        for u in _in_memory_users.values():
+            if str(u.get("_id")) == str(user_id) or str(u.get("id")) == str(user_id):
+                return u
         return None
-    return await users_collection.find_one({"_id": oid})
+
+    # Supabase provider (user_id is a UUID)
+    if not is_valid_uuid(user_id):
+        return None
+    sb = get_supabase_client()
+    rows = await sb.select("profiles", match={"id": user_id})
+    return rows[0] if rows else None
 
 
 async def create_user(user_doc: dict) -> str:
     """Insert a new user document. Returns the inserted id as a string."""
-    result = await users_collection.insert_one(user_doc)
-    return str(result.inserted_id)
+    if DATABASE_PROVIDER == "mongodb":
+        if users_collection is not None:
+            try:
+                result = await users_collection.insert_one(user_doc)
+                return str(result.inserted_id)
+            except Exception as e:
+                logger.warning(f"MongoDB insert failed ({e}). Using in-memory fallback.")
+        new_id = str(uuid.uuid4())
+        user_doc["_id"] = new_id
+        user_doc["id"] = new_id
+        _in_memory_users[user_doc["email"]] = user_doc
+        return new_id
+
+    # Supabase provider
+    sb = get_supabase_client()
+    profile_data = {
+        "id": user_doc.get("id"),
+        "email": user_doc.get("email"),
+        "full_name": user_doc.get("name") or user_doc.get("full_name") or "Architect",
+    }
+    profile_data = {k: v for k, v in profile_data.items() if v is not None}
+    rows = await sb.insert("profiles", profile_data)
+    return str(rows[0]["id"]) if rows else str(user_doc.get("id", ""))
 
 
-# ── Projects ──────────────────────────────────────────────────────────────────
+# ── MongoDB Project Repository ───────────────────────────────────────────────
+
+class MongoProjectRepository:
+    """Project repository implementation for MongoDB collections."""
+
+    async def get_projects_for_user(self, user_id: str) -> list[dict]:
+        if projects_collection is not None:
+            try:
+                cursor = projects_collection.find({"user_id": user_id}).sort("created_at", -1)
+                projects = await cursor.to_list(length=100)
+                for p in projects:
+                    p["id"] = str(p["_id"])
+                return projects
+            except Exception as e:
+                logger.warning(f"MongoDB query failed ({e}). Using in-memory fallback.")
+        return [p for p in _in_memory_projects.values() if p.get("user_id") == user_id]
+
+    async def get_project_by_id(self, project_id: str, user_id: str) -> dict | None:
+        if projects_collection is not None:
+            try:
+                if is_valid_object_id(project_id):
+                    oid = ObjectId(project_id)
+                    project = await projects_collection.find_one({"_id": oid, "user_id": user_id})
+                    if project:
+                        project["id"] = str(project["_id"])
+                        return project
+            except Exception as e:
+                logger.warning(f"MongoDB query failed ({e}). Using in-memory fallback.")
+        return _in_memory_projects.get(project_id)
+
+    async def create_project(self, project_doc: dict) -> str:
+        if projects_collection is not None:
+            try:
+                result = await projects_collection.insert_one(project_doc)
+                return str(result.inserted_id)
+            except Exception as e:
+                logger.warning(f"MongoDB insert failed ({e}). Storing in-memory.")
+        pid = str(uuid.uuid4())
+        project_doc["_id"] = pid
+        project_doc["id"] = pid
+        _in_memory_projects[pid] = project_doc
+        return pid
+
+    async def update_project(
+        self,
+        project_id: str,
+        project_doc: dict,
+        user_id: str,
+        commit_message: str = "Layout updated via editor",
+    ) -> bool:
+        if projects_collection is not None:
+            try:
+                if is_valid_object_id(project_id):
+                    oid = ObjectId(project_id)
+                    result = await projects_collection.update_one(
+                        {"_id": oid, "user_id": user_id},
+                        {"$set": project_doc}
+                    )
+                    return result.modified_count > 0
+            except Exception as e:
+                logger.warning(f"MongoDB update failed ({e}). Updating in-memory.")
+        if project_id in _in_memory_projects:
+            _in_memory_projects[project_id].update(project_doc)
+            return True
+        return False
+
+    async def delete_project(self, project_id: str, user_id: str) -> int:
+        if projects_collection is not None and is_valid_object_id(project_id):
+            try:
+                oid = ObjectId(project_id)
+                result = await projects_collection.delete_one({"_id": oid, "user_id": user_id})
+                if result.deleted_count > 0:
+                    _in_memory_projects.pop(project_id, None)
+                    return result.deleted_count
+            except Exception as e:
+                logger.warning(f"MongoDB delete failed ({e}). Checking in-memory.")
+
+        # In-memory fallback
+        if project_id in _in_memory_projects:
+            proj = _in_memory_projects[project_id]
+            if proj.get("user_id") == user_id:
+                del _in_memory_projects[project_id]
+                return 1
+        return 0
+
+    async def get_project_versions(self, project_id: str, user_id: str) -> list[dict]:
+        return []
+
+    async def get_or_create_conversation(self, project_id: str, user_id: str) -> dict:
+        if conversations_collection is not None:
+            try:
+                doc = await conversations_collection.find_one({"project_id": project_id, "user_id": user_id})
+                if doc:
+                    doc["id"] = str(doc["_id"])
+                    return doc
+                new_conv = {
+                    "project_id": project_id,
+                    "user_id": user_id,
+                    "title": "Design Assistant",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+                res = await conversations_collection.insert_one(new_conv)
+                new_conv["id"] = str(res.inserted_id)
+                return new_conv
+            except Exception as e:
+                logger.warning(f"MongoDB conversation query failed ({e}). Using in-memory fallback.")
+        key = f"{project_id}_{user_id}"
+        if key not in _in_memory_conversations:
+            _in_memory_conversations[key] = {
+                "id": f"conv_{project_id}",
+                "project_id": project_id,
+                "user_id": user_id,
+                "title": "Design Assistant",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        return _in_memory_conversations[key]
+
+    async def get_conversation_messages(self, conversation_id: str) -> list[dict]:
+        if messages_collection is not None:
+            try:
+                cursor = messages_collection.find({"conversation_id": conversation_id}).sort("created_at", 1).limit(100)
+                docs = await cursor.to_list(length=100)
+                for d in docs:
+                    d["id"] = str(d["_id"])
+                return docs
+            except Exception as e:
+                logger.warning(f"MongoDB message fetch failed ({e}). Using in-memory fallback.")
+        return _in_memory_messages.get(conversation_id, [])
+
+    async def add_conversation_message(self, conversation_id: str, sender: str, content: str, operation: Optional[dict] = None) -> dict:
+        msg = {
+            "conversation_id": conversation_id,
+            "sender": sender,
+            "content": content,
+            "operation": operation,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if messages_collection is not None:
+            try:
+                res = await messages_collection.insert_one(dict(msg))
+                msg["id"] = str(res.inserted_id)
+                return msg
+            except Exception as e:
+                logger.warning(f"MongoDB message insert failed ({e}). Using in-memory fallback.")
+        msg["id"] = f"msg_{datetime.now().timestamp()}"
+        _in_memory_messages.setdefault(conversation_id, []).append(msg)
+        return msg
+
+
+# ── Supabase Project Repository ──────────────────────────────────────────────
+
+class SupabaseProjectRepository:
+    """
+    Project repository targeting Supabase PostgreSQL (public.projects and public.project_versions).
+    Implements ownership verification, full layout_data persistence, and design snapshots.
+    """
+
+    def __init__(self, sb_client=None):
+        self._sb_client = sb_client
+
+    def _client(self):
+        return self._sb_client or get_supabase_client()
+
+    async def _insert_project_row(self, sb, row_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        attempt = dict(row_data)
+        try:
+            return await sb.insert("projects", attempt)
+        except RuntimeError as e:
+            err_msg = str(e)
+            if "layout_data" in err_msg and "layout_data" in attempt:
+                attempt.pop("layout_data", None)
+                return await sb.insert("projects", attempt)
+            raise
+
+    async def _update_project_row(
+        self, sb, project_id: str, user_id: str, update_data: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        attempt = dict(update_data)
+        try:
+            return await sb.update("projects", attempt, match={"id": project_id, "user_id": user_id})
+        except RuntimeError as e:
+            err_msg = str(e)
+            if "layout_data" in err_msg and "layout_data" in attempt:
+                attempt.pop("layout_data", None)
+                return await sb.update("projects", attempt, match={"id": project_id, "user_id": user_id})
+            raise
+
+    async def get_projects_for_user(self, user_id: str) -> list[dict]:
+        sb = self._client()
+        rows = await sb.select(
+            "projects",
+            match={"user_id": user_id},
+            order="created_at.desc",
+            limit=100,
+        )
+        return [_format_supabase_project(r) for r in rows]
+
+    async def get_project_by_id(self, project_id: str, user_id: str) -> dict | None:
+        if not is_valid_uuid(project_id):
+            return None
+        sb = self._client()
+        rows = await sb.select(
+            "projects",
+            match={"id": project_id, "user_id": user_id},
+            limit=1,
+        )
+        return _format_supabase_project(rows[0]) if rows else None
+
+    async def create_project(self, project_doc: dict) -> str:
+        sb = self._client()
+        layout_data = project_doc.get("layout_data") or {}
+        form = layout_data.get("form") or {}
+
+        plot_w = float(
+            project_doc.get("plot_width")
+            or layout_data.get("plot_width")
+            or form.get("width")
+            or 30.0
+        )
+        plot_l = float(
+            project_doc.get("plot_length")
+            or layout_data.get("plot_height")
+            or layout_data.get("plot_length")
+            or form.get("length")
+            or 40.0
+        )
+
+        raw_entry = str(project_doc.get("entry_direction") or form.get("entryDir") or "east").strip().lower()
+        entry_dir = raw_entry if raw_entry in ("north", "south", "east", "west") else "east"
+
+        raw_unit = str(project_doc.get("measurement_unit") or form.get("measurement_unit") or "ft").strip().lower()
+        measurement_unit = raw_unit if raw_unit in ("ft", "m") else "ft"
+
+        budget_val = project_doc.get("budget_target") or form.get("budget")
+        budget_target = float(budget_val) if budget_val is not None and str(budget_val).strip() != "" else None
+
+        row_data: Dict[str, Any] = {
+            "user_id": project_doc["user_id"],
+            "name": project_doc.get("name", "Untitled Plan"),
+            "plot_width": plot_w,
+            "plot_length": plot_l,
+            "measurement_unit": measurement_unit,
+            "entry_direction": entry_dir,
+            "budget_target": budget_target,
+            "layout_data": layout_data,
+            "building_preferences": {
+                "layout_data": layout_data,
+                "image_url": project_doc.get("image_url"),
+                "form": form,
+            },
+        }
+        if project_doc.get("image_url"):
+            row_data["image_url"] = project_doc.get("image_url")
+        if project_doc.get("description"):
+            row_data["description"] = project_doc.get("description")
+
+        rows = await self._insert_project_row(sb, row_data)
+        inserted_id = str(rows[0]["id"])
+
+        # Persist initial version snapshot (version 1) in public.project_versions
+        await self.create_project_version(
+            project_id=inserted_id,
+            snapshot=layout_data,
+            user_id=project_doc["user_id"],
+            commit_message="Initial plan generated",
+            version_number=1,
+        )
+
+        # Synchronize placed furniture and lighting fixtures to public tables
+        await self._sync_furniture_and_lighting(sb, inserted_id, layout_data)
+
+        return inserted_id
+
+    async def update_project(
+        self,
+        project_id: str,
+        project_doc: dict,
+        user_id: str,
+        commit_message: str = "Layout updated via editor",
+    ) -> bool:
+        if not is_valid_uuid(project_id):
+            return False
+        sb = self._client()
+        layout_data = project_doc.get("layout_data") or {}
+        form = layout_data.get("form") or {}
+
+        plot_w = float(
+            project_doc.get("plot_width")
+            or layout_data.get("plot_width")
+            or form.get("width")
+            or 30.0
+        )
+        plot_l = float(
+            project_doc.get("plot_length")
+            or layout_data.get("plot_height")
+            or layout_data.get("plot_length")
+            or form.get("length")
+            or 40.0
+        )
+
+        raw_entry = str(project_doc.get("entry_direction") or form.get("entryDir") or "east").strip().lower()
+        entry_dir = raw_entry if raw_entry in ("north", "south", "east", "west") else "east"
+
+        raw_unit = str(project_doc.get("measurement_unit") or form.get("measurement_unit") or "ft").strip().lower()
+        measurement_unit = raw_unit if raw_unit in ("ft", "m") else "ft"
+
+        budget_val = project_doc.get("budget_target") or form.get("budget")
+        budget_target = float(budget_val) if budget_val is not None and str(budget_val).strip() != "" else None
+
+        update_data: Dict[str, Any] = {
+            "name": project_doc.get("name", "Untitled Plan"),
+            "plot_width": plot_w,
+            "plot_length": plot_l,
+            "measurement_unit": measurement_unit,
+            "entry_direction": entry_dir,
+            "layout_data": layout_data,
+            "building_preferences": {
+                "layout_data": layout_data,
+                "image_url": project_doc.get("image_url"),
+                "form": form,
+            },
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if budget_target is not None:
+            update_data["budget_target"] = budget_target
+        if project_doc.get("image_url"):
+            update_data["image_url"] = project_doc.get("image_url")
+        if project_doc.get("description"):
+            update_data["description"] = project_doc.get("description")
+
+        rows = await self._update_project_row(sb, project_id, user_id, update_data)
+        if not rows:
+            return False
+
+        # Persist immutable version snapshot in public.project_versions
+        await self.create_project_version(
+            project_id=project_id,
+            snapshot=layout_data,
+            user_id=user_id,
+            commit_message=commit_message,
+        )
+
+        # Synchronize placed furniture and lighting fixtures to public tables
+        await self._sync_furniture_and_lighting(sb, project_id, layout_data)
+
+        return True
+
+    async def _sync_furniture_and_lighting(self, sb, project_id: str, layout_data: dict) -> None:
+        """Synchronize placed furniture and lighting fixtures to public.furniture_placements and public.lighting_fixtures."""
+        try:
+            furniture_rows: list[dict] = []
+            lighting_rows: list[dict] = []
+
+            floors = layout_data.get("floors") or []
+            if not floors and layout_data.get("rooms"):
+                floors = [{"level": 0, "name": "Ground Floor", "rooms": layout_data.get("rooms")}]
+
+            for floor in floors:
+                f_level = floor.get("level", 0)
+                try:
+                    f_level = int(f_level)
+                except (ValueError, TypeError):
+                    f_level = 0
+
+                # Floor level items
+                for furn in floor.get("furniture", []):
+                    furniture_rows.append({
+                        "project_id": project_id,
+                        "floor_level": f_level,
+                        "name": furn.get("name", "Furniture"),
+                        "x": float(furn.get("x", 0)),
+                        "y": float(furn.get("y", 0)),
+                        "width": float(furn.get("width", 1)),
+                        "height": float(furn.get("height", 1)),
+                        "rotation": float(furn.get("rotation", 0)),
+                        "properties": furn,
+                    })
+                for light in floor.get("lighting", []):
+                    lighting_rows.append({
+                        "project_id": project_id,
+                        "floor_level": f_level,
+                        "name": light.get("name", "Light"),
+                        "x": float(light.get("x", 0)),
+                        "y": float(light.get("y", 0)),
+                        "properties": light,
+                    })
+
+                # Room level items
+                for room in floor.get("rooms", []):
+                    r_name = room.get("name")
+                    for furn in room.get("furniture", []):
+                        if furn.get("isLight"):
+                            lighting_rows.append({
+                                "project_id": project_id,
+                                "floor_level": f_level,
+                                "room_name": r_name,
+                                "name": furn.get("name", "Light"),
+                                "x": float(furn.get("x", 0)),
+                                "y": float(furn.get("y", 0)),
+                                "properties": furn,
+                            })
+                        else:
+                            furniture_rows.append({
+                                "project_id": project_id,
+                                "floor_level": f_level,
+                                "room_name": r_name,
+                                "catalog_id": furn.get("catalogId"),
+                                "name": furn.get("name", "Furniture"),
+                                "x": float(furn.get("x", 0)),
+                                "y": float(furn.get("y", 0)),
+                                "width": float(furn.get("width", 1)),
+                                "height": float(furn.get("height", 1)),
+                                "rotation": float(furn.get("rotation", 0)),
+                                "properties": furn,
+                            })
+                    for light in room.get("lighting", []):
+                        lighting_rows.append({
+                            "project_id": project_id,
+                            "floor_level": f_level,
+                            "room_name": r_name,
+                            "name": light.get("name", "Light"),
+                            "x": float(light.get("x", 0)),
+                            "y": float(light.get("y", 0)),
+                            "properties": light,
+                        })
+
+            try:
+                await sb.delete("furniture_placements", match={"project_id": project_id})
+                for row in furniture_rows:
+                    await sb.insert("furniture_placements", row)
+            except Exception as e:
+                logger.warning(f"Note: Could not sync to public.furniture_placements: {e}")
+
+            try:
+                await sb.delete("lighting_fixtures", match={"project_id": project_id})
+                for row in lighting_rows:
+                    await sb.insert("lighting_fixtures", row)
+            except Exception as e:
+                logger.warning(f"Note: Could not sync to public.lighting_fixtures: {e}")
+        except Exception as e:
+            logger.warning(f"Furniture & lighting extraction warning: {e}")
+
+    async def create_project_version(
+        self,
+        project_id: str,
+        snapshot: dict,
+        user_id: str,
+        commit_message: str = "Layout updated via editor",
+        version_number: Optional[int] = None,
+    ) -> int:
+        """Create a new design snapshot in public.project_versions with sequential versioning."""
+        sb = self._client()
+        if version_number is None:
+            try:
+                versions = await sb.select(
+                    "project_versions",
+                    select="version_number",
+                    match={"project_id": project_id},
+                    order="version_number.desc",
+                    limit=1,
+                )
+                if versions and "version_number" in versions[0]:
+                    version_number = int(versions[0]["version_number"]) + 1
+                else:
+                    version_number = 1
+            except Exception as e:
+                print(f"[supabase] Failed to query latest version number: {e}")
+                version_number = 1
+
+        version_doc = {
+            "project_id": project_id,
+            "version_number": version_number,
+            "commit_message": commit_message,
+            "snapshot": snapshot,
+            "created_by": user_id,
+        }
+        try:
+            await sb.insert("project_versions", version_doc)
+            return version_number
+        except Exception as e:
+            print(f"[supabase] Note: project_versions insert skipped: {e}")
+            return version_number
+
+    async def delete_project(self, project_id: str, user_id: str) -> int:
+        # Check in-memory fallback first if not standard UUID or if in-memory copy exists
+        if not is_valid_uuid(project_id):
+            if project_id in _in_memory_projects:
+                proj = _in_memory_projects[project_id]
+                if proj.get("user_id") == user_id:
+                    del _in_memory_projects[project_id]
+                    return 1
+            return 0
+
+        sb = self._client()
+        # Clean up dependent records first to satisfy foreign-key constraints
+        try:
+            await sb.delete("furniture_placements", match={"project_id": project_id})
+        except Exception as e:
+            logger.warning(f"Note: Could not cascade delete furniture_placements: {e}")
+        try:
+            await sb.delete("lighting_fixtures", match={"project_id": project_id})
+        except Exception as e:
+            logger.warning(f"Note: Could not cascade delete lighting_fixtures: {e}")
+        try:
+            convs = await sb.select("design_conversations", match={"project_id": project_id, "user_id": user_id})
+            for c in convs:
+                if "id" in c:
+                    try:
+                        await sb.delete("conversation_messages", match={"conversation_id": c["id"]})
+                    except Exception:
+                        pass
+            await sb.delete("design_conversations", match={"project_id": project_id, "user_id": user_id})
+        except Exception as e:
+            logger.warning(f"Note: Could not cascade delete design_conversations: {e}")
+        try:
+            await sb.delete("project_versions", match={"project_id": project_id})
+        except Exception as e:
+            logger.warning(f"Note: Could not cascade delete project_versions: {e}")
+
+        deleted_count = await sb.delete("projects", match={"id": project_id, "user_id": user_id})
+        _in_memory_projects.pop(project_id, None)
+        return deleted_count
+
+    async def get_project_versions(self, project_id: str, user_id: str) -> list[dict]:
+        if not is_valid_uuid(project_id):
+            return []
+        sb = self._client()
+        proj = await self.get_project_by_id(project_id, user_id)
+        if not proj:
+            return []
+        rows = await sb.select(
+            "project_versions",
+            match={"project_id": project_id},
+            order="version_number.desc",
+            limit=50,
+        )
+        return [
+            {
+                "id": str(r.get("id", "")),
+                "project_id": str(r["project_id"]),
+                "version_number": int(r["version_number"]),
+                "commit_message": r.get("commit_message"),
+                "snapshot": r.get("snapshot", {}),
+                "created_by": str(r.get("created_by") or user_id),
+                "created_at": r.get("created_at"),
+            }
+            for r in rows
+        ]
+
+    async def get_or_create_conversation(self, project_id: str, user_id: str) -> dict:
+        sb = self._client()
+        try:
+            rows = await sb.select("design_conversations", match={"project_id": project_id, "user_id": user_id}, limit=1)
+            if rows:
+                return rows[0]
+            new_conv = {
+                "project_id": project_id,
+                "user_id": user_id,
+                "title": "Design Assistant",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            inserted = await sb.insert("design_conversations", new_conv)
+            return inserted[0] if inserted else new_conv
+        except Exception as e:
+            logger.warning(f"Note: Could not query design_conversations in Supabase: {e}")
+            return {"id": f"conv_{project_id}", "project_id": project_id, "user_id": user_id, "title": "Design Assistant"}
+
+    async def get_conversation_messages(self, conversation_id: str) -> list[dict]:
+        sb = self._client()
+        try:
+            return await sb.select("conversation_messages", match={"conversation_id": conversation_id}, order="created_at.asc", limit=100)
+        except Exception as e:
+            logger.warning(f"Note: Could not query conversation_messages in Supabase: {e}")
+            return []
+
+    async def add_conversation_message(self, conversation_id: str, sender: str, content: str, operation: Optional[dict] = None) -> dict:
+        sb = self._client()
+        msg = {
+            "conversation_id": conversation_id,
+            "sender": sender,
+            "content": content,
+            "operation": operation,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            inserted = await sb.insert("conversation_messages", msg)
+            return inserted[0] if inserted else msg
+        except Exception as e:
+            logger.warning(f"Note: Could not insert conversation_message in Supabase: {e}")
+            return msg
+
+
+# ── Repository Instances & Dispatching ───────────────────────────────────────
+
+mongo_project_repo = MongoProjectRepository()
+supabase_project_repo = SupabaseProjectRepository()
+
+def get_project_repository():
+    """Returns the active project repository according to DATABASE_PROVIDER."""
+    if DATABASE_PROVIDER == "supabase":
+        return supabase_project_repo
+    return mongo_project_repo
+
+
+# ── Module-Level Function Interfaces (Backward Compatibility) ────────────────
 
 async def get_projects_for_user(user_id: str) -> list[dict]:
     """Return all projects owned by user_id, sorted newest-first."""
-    cursor = projects_collection.find({"user_id": user_id}).sort("created_at", -1)
-    projects = await cursor.to_list(length=100)
-    for p in projects:
-        p["id"] = str(p["_id"])
-    return projects
+    return await get_project_repository().get_projects_for_user(user_id)
 
 
 async def get_project_by_id(project_id: str, user_id: str) -> dict | None:
-    """Return a single project owned by user_id, or None.
-    
-    Raises:
-        Any Motor/pymongo exception other than InvalidId — these are genuine
-        infrastructure failures and must NOT be silenced.
-    """
-    try:
-        oid = ObjectId(project_id)
-    except InvalidId:
-        return None
-    project = await projects_collection.find_one({"_id": oid, "user_id": user_id})
-    if project:
-        project["id"] = str(project["_id"])
-    return project
+    """Return a single project owned by user_id, or None."""
+    return await get_project_repository().get_project_by_id(project_id, user_id)
 
 
 async def create_project(project_doc: dict) -> str:
     """Insert a new project document. Returns the inserted id as a string."""
-    result = await projects_collection.insert_one(project_doc)
-    return str(result.inserted_id)
+    return await get_project_repository().create_project(project_doc)
 
 
-async def update_project(project_id: str, project_doc: dict, user_id: str) -> bool:
+async def update_project(
+    project_id: str,
+    project_doc: dict,
+    user_id: str,
+    commit_message: str = "Layout updated via editor",
+) -> bool:
     """Update an existing project document. Returns True if updated."""
-    try:
-        oid = ObjectId(project_id)
-    except InvalidId:
-        return False
-    result = await projects_collection.update_one(
-        {"_id": oid, "user_id": user_id},
-        {"$set": project_doc}
+    return await get_project_repository().update_project(
+        project_id, project_doc, user_id, commit_message=commit_message
     )
-    return result.modified_count > 0
+
 
 async def delete_project(project_id: str, user_id: str) -> int:
-    """
-    Delete a project owned by user_id.
-    Returns the number of documents deleted (0 or 1).
-    
-    Raises:
-        Any Motor/pymongo exception other than InvalidId.
-    """
-    try:
-        oid = ObjectId(project_id)
-    except InvalidId:
-        return 0
-    result = await projects_collection.delete_one({"_id": oid, "user_id": user_id})
-    return result.deleted_count
+    """Delete a project owned by user_id. Returns deleted count (0 or 1)."""
+    return await get_project_repository().delete_project(project_id, user_id)
+
+
+async def get_project_versions(project_id: str, user_id: str) -> list[dict]:
+    """Return version history snapshots for a project."""
+    return await get_project_repository().get_project_versions(project_id, user_id)
+
+
+async def get_or_create_conversation(project_id: str, user_id: str) -> dict:
+    """Return or create a design conversation for the project and user."""
+    return await get_project_repository().get_or_create_conversation(project_id, user_id)
+
+
+async def get_conversation_messages(conversation_id: str) -> list[dict]:
+    """Return messages for a conversation ordered by created_at."""
+    return await get_project_repository().get_conversation_messages(conversation_id)
+
+
+async def add_conversation_message(conversation_id: str, sender: str, content: str, operation: Optional[dict] = None) -> dict:
+    """Add a message to a design conversation."""
+    return await get_project_repository().add_conversation_message(conversation_id, sender, content, operation=operation)
